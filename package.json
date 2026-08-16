@@ -1,0 +1,17 @@
+{
+  "name": "finance-core",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently --kill-others --names api,demo \"npm:dev:api\" \"npm:dev:demo\"",
+    "dev:api": "uv run --offline --project backend --cache-dir .tmp/uv-cache uvicorn finance_core.main:app --host 127.0.0.1 --port 8788 --reload --reload-dir backend/finance_core",
+    "dev:demo": "vite --host 127.0.0.1 --port 5174",
+    "test": "uv run --offline --project backend --cache-dir .tmp/uv-cache pytest --basetemp .tmp/pytest",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.4",
+    "vite": "^6.0.7"
+  }
+}

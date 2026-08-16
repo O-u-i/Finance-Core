@@ -1,0 +1,28 @@
+:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #e9f0ed; background: #0b1210; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(circle at 80% 0%, #16372e 0, transparent 35%), #0b1210; }
+#app { width: min(1120px, calc(100% - 40px)); margin: 0 auto; padding: 44px 0; }
+header, .intro { display: flex; align-items: center; justify-content: space-between; gap: 32px; }
+header { padding-bottom: 30px; border-bottom: 1px solid #284239; }
+h1 { margin: 3px 0 0; font-size: clamp(2.1rem, 5vw, 4.4rem); letter-spacing: -0.055em; }
+h2 { font-size: 1.15rem; font-weight: 600; }
+p { color: #a8bab3; line-height: 1.65; }
+.eyebrow { margin: 0; color: #71e2b7; font-size: .72rem; font-weight: 700; letter-spacing: .16em; }
+.badge { padding: 9px 13px; border: 1px solid #356b58; border-radius: 999px; color: #9ee8ca; font-size: .82rem; white-space: nowrap; }
+.intro { padding: 54px 0; }
+.intro > div { max-width: 590px; }
+dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin: 0; }
+dl div, .card { padding: 18px; border: 1px solid #284239; border-radius: 14px; background: rgba(19, 34, 29, .72); }
+dt, .card span, .card small { color: #94aaa1; font-size: .76rem; }
+dd { margin: 6px 0 0; font-size: 1.55rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(235px, 1fr)); gap: 14px; }
+.card { display: grid; gap: 10px; }
+.card strong { font-size: 1.45rem; }
+.formula { margin-top: 44px; padding: 28px; border-radius: 18px; background: #101c18; }
+.formula ul { list-style: none; padding: 0; }
+.formula li { display: grid; grid-template-columns: 170px 1fr; gap: 20px; padding: 11px 0; border-bottom: 1px solid #223a32; color: #a8bab3; }
+code { color: #71e2b7; }
+.status { margin: 18vh auto; max-width: 650px; padding: 36px; border: 1px solid #284239; border-radius: 18px; background: #101c18; }
+button { padding: 10px 16px; color: #092018; background: #71e2b7; border: 0; border-radius: 8px; font-weight: 700; cursor: pointer; }
+footer { margin-top: 46px; padding-top: 20px; border-top: 1px solid #284239; color: #70867d; font-size: .8rem; }
+@media (max-width: 720px) { header, .intro { align-items: flex-start; flex-direction: column; } dl { width: 100%; } .formula li { grid-template-columns: 1fr; gap: 4px; } }
