@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +84,33 @@ def counts(bundle: ImportBundle) -> dict[str, int]:
     }
 
 
+def audit_legacy_transactions(connection: sqlite3.Connection) -> dict[str, Any]:
+    """Describe v1 rows without inventing double-entry counterparts."""
+    items = rows(connection, """
+        SELECT id, date, account, amount, currency, ref, debit, credit
+        FROM transactions ORDER BY date, ref, id
+    """)
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for item in items:
+        key = (item["date"], item["currency"], item["ref"] or "")
+        groups.setdefault(key, []).append(item)
+    balanced_candidates = 0
+    for grouped in groups.values():
+        if len(grouped) < 2:
+            continue
+        debit = sum((Decimal(str(item["debit"] or 0)) for item in grouped), Decimal(0))
+        credit = sum((Decimal(str(item["credit"] or 0)) for item in grouped), Decimal(0))
+        if debit == credit and debit != 0:
+            balanced_candidates += len(grouped)
+    return {
+        "legacyRows": len(items),
+        "candidateRowsForHumanReview": balanced_candidates,
+        "requiresHumanCompletion": len(items),
+        "automaticallyWrittenToV2": 0,
+        "policy": "No counterpart, suspense account, FX valuation, account type, or lot is inferred.",
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Safely migrate legacy SFOS finance tables into a new Finance Core database.")
     parser.add_argument("--source", type=Path, required=True)
@@ -93,7 +121,12 @@ def main() -> None:
         parser.error("The source database file does not exist.")
     with open_read_only(args.source) as source:
         bundle = extract_legacy_bundle(source)
-    print(json.dumps({"mode": "apply" if args.apply else "dry-run", "validated": counts(bundle)}, ensure_ascii=False))
+        ledger_audit = audit_legacy_transactions(source)
+    print(json.dumps({
+        "mode": "legacy-archive-apply" if args.apply else "dry-run",
+        "validated": counts(bundle),
+        "v2LedgerAudit": ledger_audit,
+    }, ensure_ascii=False))
     if not args.apply:
         return
     if args.target is None:

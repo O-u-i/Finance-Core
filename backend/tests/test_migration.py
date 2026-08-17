@@ -1,7 +1,7 @@
 import sqlite3
 
 from finance_core.database import FinanceRepository, connect
-from finance_core.migration import extract_legacy_bundle
+from finance_core.migration import audit_legacy_transactions, extract_legacy_bundle
 
 
 def test_legacy_extract_excludes_context_and_reports(tmp_path):
@@ -19,6 +19,7 @@ def test_legacy_extract_excludes_context_and_reports(tmp_path):
       CREATE TABLE validation_reports (id TEXT, snapshot_json TEXT);
       CREATE TABLE knowledge_notes (id TEXT, content TEXT);
       INSERT INTO holdings VALUES ('h1','DEMO','Synthetic','ETF',1,100,110,'CNY','Demo','Synthetic');
+      INSERT INTO transactions VALUES ('t1','2026-08-17','1001 Cash','Manual','Deposit','Synthetic','',100,'CNY','Synthetic','',NULL,NULL,NULL,NULL,100,0);
       INSERT INTO analysis_reports VALUES ('private-report','{}');
       INSERT INTO validation_reports VALUES ('private-validation','{}');
       INSERT INTO knowledge_notes VALUES ('private-context','excluded');
@@ -26,6 +27,11 @@ def test_legacy_extract_excludes_context_and_reports(tmp_path):
     bundle = extract_legacy_bundle(source)
     assert [item.id for item in bundle.holdings] == ["h1"]
     assert not hasattr(bundle, "analysis_reports")
+    audit = audit_legacy_transactions(source)
+    assert audit["legacyRows"] == 1
+    assert audit["automaticallyWrittenToV2"] == 0
+    assert audit["requiresHumanCompletion"] == 1
     target = connect(tmp_path / "core.sqlite3")
+    assert [row[0] for row in target.execute("SELECT version FROM schema_migrations ORDER BY version")] == [1, 2]
     FinanceRepository(target).replace_bundle(bundle.model_dump(by_alias=True))
     assert FinanceRepository(target).export_bundle()["holdings"][0]["id"] == "h1"

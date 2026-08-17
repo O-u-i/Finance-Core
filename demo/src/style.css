@@ -26,3 +26,50 @@ code { color: #71e2b7; }
 button { padding: 10px 16px; color: #092018; background: #71e2b7; border: 0; border-radius: 8px; font-weight: 700; cursor: pointer; }
 footer { margin-top: 46px; padding-top: 20px; border-top: 1px solid #284239; color: #70867d; font-size: .8rem; }
 @media (max-width: 720px) { header, .intro { align-items: flex-start; flex-direction: column; } dl { width: 100%; } .formula li { grid-template-columns: 1fr; gap: 4px; } }
+
+/* Finance Core 2.0 functional demo */
+button, input, select, textarea { font: inherit; }
+button, .button { border: 1px solid #3b6757; border-radius: 8px; padding: 8px 11px; color: #e9f0ed; background: #152720; cursor: pointer; text-decoration: none; }
+button.primary, .tab.active { color: #092018; background: #71e2b7; border-color: #71e2b7; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+input, select, textarea { width: 100%; border: 1px solid #315647; border-radius: 7px; padding: 8px 9px; color: #e9f0ed; background: #0d1915; }
+header { padding-bottom: 22px; }
+nav { display: flex; gap: 6px; margin: 22px 0; overflow-x: auto; }
+.tab { white-space: nowrap; background: transparent; }
+.panel { margin-bottom: 16px; padding: 21px; border: 1px solid #284239; border-radius: 14px; background: rgba(16, 28, 24, .92); }
+.hero, .section-title { display: flex; align-items: center; justify-content: space-between; gap: 22px; }
+.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+.metrics article { padding: 16px; border: 1px solid #284239; border-radius: 12px; background: #101c18; }
+.metrics span, small { display: block; color: #94aaa1; }
+.metrics strong { display: block; margin-top: 7px; font-size: 1.5rem; }
+.pass, .check.pass strong { color: #71e2b7; }
+.error, .check.error strong { color: #ff9e9e; }
+.columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.compact-form, .inline-form, .form-grid { display: grid; gap: 9px; margin-bottom: 16px; }
+.compact-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.inline-form { grid-template-columns: repeat(6, minmax(100px, 1fr)); }
+.form-grid { grid-template-columns: repeat(4, minmax(125px, 1fr)); }
+label { display: grid; gap: 4px; color: #94aaa1; font-size: .82rem; }
+.list { display: grid; gap: 8px; }
+.list article { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 11px; border: 1px solid #223a32; border-radius: 9px; }
+.entries article > div { flex: 1; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+th, td { padding: 8px; border-bottom: 1px solid #223a32; text-align: left; vertical-align: top; }
+th { color: #94aaa1; }
+.postings { margin: 15px 0; }
+.postings table { min-width: 1220px; }
+.postings td:nth-child(8) { min-width: 170px; }
+.postings td:nth-child(8) input { margin-top: 4px; }
+.check-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 9px; }
+.check { display: grid; gap: 5px; padding: 11px; border: 1px solid #284239; border-radius: 9px; }
+.validation { display: grid; gap: 6px; margin-top: 15px; padding: 13px; border-radius: 9px; }
+.validation.valid, .notice.success { border: 1px solid #3a8c6d; background: #123a2e; }
+.validation.invalid, .notice.error { border: 1px solid #9c5159; background: #3b1b22; }
+.validation p { margin: 0; }
+.notice { margin-bottom: 14px; padding: 11px 14px; border-radius: 8px; }
+.empty { padding: 28px; border: 1px dashed #356b58; border-radius: 10px; text-align: center; }
+pre { max-height: 360px; overflow: auto; white-space: pre-wrap; }
+@media (max-width: 900px) { .columns, .metrics, .form-grid, .inline-form { grid-template-columns: 1fr 1fr; } .hero, .section-title { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 600px) { #app { width: min(100% - 18px, 1120px); } .columns, .metrics, .form-grid, .inline-form, .compact-form { grid-template-columns: 1fr; } .panel { padding: 14px; } }

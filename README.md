@@ -1,4 +1,4 @@
-# Finance Core - v1.0.0
+# Finance Core - v2.0.0
 
 Finance Core（FC）是可复用、本地优先的个人财务领域与数据服务。它可以独立展示，也可以被 SFOS 等界面通过版本化 HTTP API 调用。
 
@@ -7,10 +7,10 @@ FC 不依赖 SFOS、Context Sources、OpenAI、Ollama 或任何 LLM。
 ## 能力与边界
 
 ```text
-SFOS adapter / FC demo
+SFOS adapter / independent FC demo
         │
         ▼
-FastAPI /api/v1
+FastAPI /api/v2
         │
 deterministic domain + application operations
         │
@@ -19,9 +19,10 @@ SQLite adapter
 
 FC 拥有：
 
-- Journal transactions 与 account options
-- Holdings
-- Recurring rules 与到期生成命令
+- `JournalEntry + Posting[]` 完整交易聚合、draft/validate/post/reversal
+- Decimal string、Commodity Registry、类型化账户、显式 FX 估值
+- 显式 lot acquisition/disposal 与只读派生 Holdings
+- Recurring posting templates 与到期 draft 生成命令
 - Living accounts、balance snapshots 与 monthly plans
 - Dashboard metrics、T-account、financial statements、reconciliation
 - JSON/CSV import/export
@@ -35,18 +36,18 @@ FC 不提供模型分析、投资建议、交易、支付、银行/券商连接�
 要求 Node.js、npm、Python 3.12 与 `uv`。
 
 ```powershell
-cd S:\Codex-Projects\Finance-Core
+cd <path-to-Finance-Core>
 npm.cmd install --offline
 uv sync --project backend --cache-dir .tmp/uv-cache
 ```
 
-启动 API 与独立只读演示 UI：
+启动 API 与独立完整功能 Demo UI：
 
 ```powershell
 npm.cmd run dev
 ```
 
-- Demo：`http://127.0.0.1:5174`
+- Demo：`http://127.0.0.1:5174`（通用、合成数据优先、与 SFOS 完全解耦）
 - API：`http://127.0.0.1:8788`
 - OpenAPI：`http://127.0.0.1:8788/docs`
 
@@ -56,11 +57,44 @@ npm.cmd run dev
 npm.cmd run dev:api
 ```
 
-## API v1
+## API v2
 
-健康与兼容性：`GET /api/v1/health`
+健康与兼容性：`GET /api/v2/health`
 
-资源级 CRUD：
+主数据：
+
+- `/api/v2/commodities`
+- `/api/v2/accounts`
+- `/api/v2/price-quotes`
+
+完整交易生命周期：
+
+- `/api/v2/journal-entry-drafts`
+- `POST /api/v2/journal-entry-drafts/{id}/validate`
+- `POST /api/v2/journal-entry-drafts/{id}/post`
+- `/api/v2/journal-entries`（只读；posted entry 不允许 PATCH/DELETE）
+- `POST /api/v2/journal-entries/{id}/reverse`
+
+派生读模型与其他确定性功能：
+
+- `/api/v2/dashboard`、`/t-accounts`、`/financial-statements`、`/cash-flow`、`/reconciliation`
+- `/api/v2/holdings`（open lots 派生，只读）
+- `/api/v2/living-accounts`、`/living-snapshots`、`/monthly-plans`、`/world`
+- `/api/v2/recurring-entry-rules` 与 `POST /generate-due`（只生成 draft）
+- `/api/v2/import/drafts`、`/api/v2/import/drafts.csv`
+- `/api/v2/export`、`/api/v2/export/journal-entries.csv`
+- `/api/v2/backup` 与 `/api/v2/backup/restore`（schema/hash 校验且只允许空 v2 ledger）
+- `/api/v2/undo`（10 分钟单次 undo；post/reversal 会使旧 token 失效）
+
+金额、余额、数量、成本、价格和汇率在公共契约中均为 canonical decimal string。Python 使用 `Decimal`；SQLite 保存规范字符串。Commodity `scale` 决定 units/金额精度，计算采用 `ROUND_HALF_EVEN`。跨商品 posting 必须显式提供 `valuationRate` 与 `rateType`，并在 entry 的 `balancingCommodityCode` 下精确平衡。
+
+资产处置必须显式指定 lot allocations。FC 不自动选择 FIFO/LIFO，也不替用户决定税务策略。行情仅来自显式 `PriceQuote`；FC 不连接外部行情服务。
+
+## API v1（Legacy Read-only）
+
+健康与兼容性：`GET /api/v1/health`。所有 v1 POST/PUT/PATCH/DELETE 返回 `410 LEGACY_API_READ_ONLY`。
+
+旧资源仅保留 GET/export，以便人工迁移与审计：
 
 - `/api/v1/transactions`
 - `/api/v1/holdings`
@@ -70,22 +104,16 @@ npm.cmd run dev:api
 - `/api/v1/monthly-plans`
 - `/api/v1/account-options`
 
-查询与命令：
+旧查询：
 
 - `GET /api/v1/dashboard`
 - `GET /api/v1/t-accounts`
 - `GET /api/v1/financial-statements`
 - `GET /api/v1/reconciliation`
-- `POST /api/v1/recurring-rules/generate-due`
-- `POST /api/v1/living-accounts/{id}/record-balance`
-- `POST /api/v1/undo`
-- `POST /api/v1/batch`（SFOS 一次 UI 操作对应一个原子 batch 与一个 undo token）
 - `GET /api/v1/export`
-- `POST /api/v1/import`
 - `GET /api/v1/export/{transactions|holdings}.csv`
-- `POST /api/v1/import/{transactions|holdings}.csv`
 
-兼容规则：Patch 只做兼容修复；Minor 可增加端点或可选字段；删除、重命名、改变 requiredness 或语义必须升级 Major。SFOS v0.5 的兼容范围为 `>=1.0.0 <2.0.0`。
+兼容规则：Patch 只做兼容修复；Minor 可增加端点或可选字段；删除、重命名、改变 requiredness 或语义必须升级 Major。FC 2 客户端范围为 `>=2.0.0 <3.0.0`。
 
 ## 数据迁移
 
@@ -101,11 +129,12 @@ uv run --project backend python -m finance_core.migration --source '<legacy-sfos
 uv run --project backend python -m finance_core.migration --source '<legacy-sfos-db>' --target '<new-fc-db>' --apply
 ```
 
-脚本：
+该脚本现在把旧表视为只读 legacy archive：
 
 - 以 read-only 模式打开源数据库；
 - 拒绝覆盖已有目标；
-- 迁移财务实体；
+- 输出 v2 ledger audit；所有旧 flat transaction 都要求人工补齐，自动写入 v2 的数量固定为 0；
+- `--apply` 只把旧实体保存到目标库的 v1 read-only tables，不制造 v2 对手方、suspense account、FX 或 lot；
 - 不迁移 `knowledge_notes`、`validation_reports`、`analysis_reports`；
 - 运行 `PRAGMA integrity_check` 与 `PRAGMA foreign_key_check`。
 
@@ -116,7 +145,15 @@ npm.cmd test
 npm.cmd run build
 ```
 
-当前测试覆盖 API 版本、CRUD、单次撤销、账户选项撤销、确定性聚合、CSV、导出边界和迁移排除边界。全部使用合成数据与临时 SQLite。
+当前测试覆盖 v1 只读兼容、v2 aggregate lifecycle、Decimal/scale、FX、显式 lot、reversal、派生持仓与报表、living world、JSON/CSV draft import、周期 draft、hash backup restore、单次撤销和迁移排除边界。全部使用合成数据与临时 SQLite。
+
+## 独立 Demo 边界
+
+- Demo 只调用 `/api/v2` HTTP API，不访问 SQLite、repository 或 backend 内部对象。
+- Demo 不导入 SFOS 类型、组件、CSS、客户端或配置；SFOS 也不依赖 Demo。
+- 提供 Commodity/Account/Price、draft editor、split posting、FX、lot、validation、post、reversal、派生报表、生活账户、计划、周期、import/export、backup 和 undo 的交互。
+- 一键示例只允许在空 v2 ledger 装载通用合成数据。
+- Demo 是功能验收台；未来博客 UI 可以重写视觉层，而不改变 FC HTTP contract。
 
 ## Codex 跨仓规则
 
@@ -152,9 +189,9 @@ READ_ONLY
 
 ```text
 IMPLEMENT_APPROVED
-请在 Soren-Finance-App 适配 Finance Core [版本] 的 [端点/能力]。
-先读取 Finance Core 的 /api/v1/health 与 OpenAPI 契约，仅通过 HTTP Client 对接，不读取 FC 源码或 SQLite。
-保持 Dashboard 只读，不在 SFOS 复制确定性财务规则。
+请在 Soren-Finance-App 适配 Finance Core 2.0.0 的 /api/v2 aggregate ledger。
+先读取 Finance Core 的 /api/v2/health 与 OpenAPI 契约，仅通过 HTTP Client 对接，不读取 FC 源码或 SQLite。
+使用 JournalEntryDraft -> validate -> human confirm -> post；posted 更正只调用 reversal。Decimal string 不得转为 JS number 后回写。保持 Dashboard/Holdings 只读，不在 SFOS 复制确定性财务规则或依赖 FC Demo。
 补充契约测试、typecheck、build 和 README；不要修改 Finance-Core，不要 commit/push。
 完成后输出 Cross-repo impact 区块。
 ```

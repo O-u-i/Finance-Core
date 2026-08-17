@@ -16,12 +16,14 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from finance_core import __version__
+from finance_core.api_v2 import create_v2_router
 from finance_core.database import DEFAULT_DATABASE_PATH, RESOURCE_CONFIG, FinanceRepository, connect
 from finance_core.domain import account_flows, dashboard, financial_statements, reconciliation, world_metrics
+from finance_core.ledger_repository import LedgerRepository
 from finance_core.models import BatchRequest, ImportBundle, ResourcePatch, UndoRequest
 
-API_VERSION = "1.0.0"
-SCHEMA_VERSION = 1
+API_VERSION = "2.0.0"
+SCHEMA_VERSION = 2
 CAPABILITIES = [
     "transactions", "holdings", "account-options", "recurring-rules",
     "living-accounts", "living-snapshots", "monthly-plans", "dashboard",
@@ -45,6 +47,7 @@ def create_app(
         database = connection or connect(database_path)
         app.state.database = database
         app.state.repository = FinanceRepository(database)
+        app.state.ledger_repository = LedgerRepository(database)
         try:
             yield
         finally:
@@ -57,6 +60,20 @@ def create_app(
         description="Local-first deterministic finance domain and data service.",
         lifespan=lifespan,
     )
+
+    @app.middleware("http")
+    async def legacy_api_is_read_only(request: Request, call_next):
+        if request.url.path.startswith("/api/v1/") and request.method not in {"GET", "HEAD", "OPTIONS"}:
+            return JSONResponse(
+                status_code=410,
+                content={
+                    "error": {
+                        "code": "LEGACY_API_READ_ONLY",
+                        "message": "Finance Core v1 is read-only. Use the aggregate ledger under /api/v2.",
+                    }
+                },
+            )
+        return await call_next(request)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_request: Request, error: RequestValidationError) -> JSONResponse:
@@ -81,9 +98,10 @@ def create_app(
             "status": "ok",
             "service": "finance-core",
             "serviceVersion": __version__,
-            "apiVersion": API_VERSION,
+            "apiVersion": "1.0.0",
             "schemaVersion": SCHEMA_VERSION,
-            "capabilities": CAPABILITIES,
+            "legacyReadOnly": True,
+            "capabilities": ["legacy-read", "legacy-export"],
         }
 
     def repository(request: Request) -> FinanceRepository:
@@ -313,6 +331,7 @@ def create_app(
             dashboard(transactions, holdings),
         )}
 
+    app.include_router(create_v2_router())
     return app
 
 
