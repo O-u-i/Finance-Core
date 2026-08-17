@@ -35,6 +35,18 @@ Prompt for the other repo:
 - Do not add SFOS-only behavior to FC merely to satisfy one screen; define a generic finance capability.
 - Release order is FC contract and synthetic tests first, then SFOS client/UI.
 
+### Requirement triage
+
+- When requirement ownership is unclear, perform `READ_ONLY` triage before implementation. Do not edit either repository until the requirement is classified.
+- Use a single entry point: do not ask the SFOS and FC Codex tasks to independently or concurrently design the same requirement. Product-facing or otherwise uncertain requirements start in SFOS; clearly reusable finance-domain requirements may start in FC.
+- Classify every requirement as exactly one of:
+  - `SFOS_ONLY`: UI, navigation, Context Sources, Context LLM, Inference LLM, or presentation-only changes.
+  - `FC_ONLY`: finance entities, deterministic calculations, persistence, CSV, undo, or generic finance APIs.
+  - `BOTH`: SFOS requires a new or changed FC contract.
+- For `BOTH`, use **FC first**: implement and test FC, determine the compatible API version, and only then adapt SFOS.
+- Cross-repository work must produce a complete prompt that can be sent directly to the other repository. The prompt must include scope, responsibility boundaries, expected endpoints and version, required tests, privacy constraints, and `do not commit/push`.
+- Do not create a local substitute implementation merely because the other repository has not implemented the required capability yet.
+
 ## Authorization and Git safety
 
 - Review, explanation, diagnosis, and planning are `READ_ONLY`.

@@ -120,7 +120,33 @@ npm.cmd run build
 
 ## Codex 跨仓规则
 
-每次修改必须输出统一影响区块。若 FC contract 影响 SFOS，先完成 FC 实现与测试，再提供 SFOS 精确适配 prompt。
+每次修改必须输出统一影响区块。所有新需求只从一个仓库进入分诊：不知道归属时，只在一个仓库先用 `READ_ONLY` 询问，不要同时把同一需求发送给 SFOS 与 FC 两个 Codex 任务，也不要让它们并行、独立设计同一需求。面向产品或仍无法判断归属的需求默认从 SFOS 开始；明确属于通用财务领域的需求可以从 FC 开始。
+
+分诊结果必须是以下三类之一：
+
+- `SFOS_ONLY`：UI、导航、Context Sources、Context LLM、Inference LLM 或纯展示修改。
+- `FC_ONLY`：财务实体、确定性计算、持久化、CSV、undo 或通用财务 API。
+- `BOTH`：SFOS 需要新增或修改 FC contract。
+
+`BOTH` 必须遵循 **FC first**：先在 FC 实现并用合成数据完成测试，确定兼容的 API 版本，再适配 SFOS；保留现有 FC → SFOS 的发布与适配顺序。不得因为另一仓库暂未实现所需能力，就在当前仓库创建本地替代实现。跨仓时必须生成可直接发送给另一仓库的完整 prompt，并包含范围、职责边界、端点与版本预期、测试、隐私约束以及 `do not commit/push`。
+
+不知道需求归属时，可先把下面的通用分诊 prompt 复制到一个仓库；不要同时发送给两个任务：
+
+```text
+READ_ONLY
+请只读分析以下需求的跨仓归属，不要修改文件、代码、API、schema、capabilities 或版本号：
+
+[在此粘贴需求]
+
+请将需求归类为且仅归类为 SFOS_ONLY、FC_ONLY 或 BOTH：
+- SFOS_ONLY：UI、导航、Context Sources、Context LLM、Inference LLM、纯展示修改。
+- FC_ONLY：财务实体、确定性计算、持久化、CSV、undo、通用财务 API。
+- BOTH：SFOS 需要新增或修改 FC contract。
+
+请说明归类依据、两个仓库的职责边界、预期端点与兼容版本、所需测试和隐私约束。
+如果是 BOTH，请坚持 FC first：先实现并测试 FC、确定兼容 API 版本，再适配 SFOS；同时生成一份可直接发送给另一仓库的完整 prompt。
+不得创建本地替代实现；不要读取真实财务数据、SQLite、导入导出文件或环境变量；do not commit/push。
+```
 
 发给 SFOS Codex 的标准 prompt：
 
