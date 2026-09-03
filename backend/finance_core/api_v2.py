@@ -6,10 +6,19 @@ import json
 import sqlite3
 from datetime import date
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 from pydantic import ValidationError
 
+from finance_core.contracts_v3 import (
+    BEARER_OR_SESSION_SECURITY,
+    HoldingResponse,
+    HoldingsResponse,
+    LedgerResponse,
+    LivingAccountDeleteResponse,
+    STANDARD_ERROR_RESPONSES,
+)
 from finance_core.ledger_repository import LedgerRepository, dump
 from finance_core.models import UndoRequest
 from finance_core.models_v2 import (
@@ -32,12 +41,52 @@ def repo(request: Request) -> LedgerRepository:
 
 def translate(error: Exception) -> HTTPException:
     if isinstance(error, LookupError):
-        return HTTPException(404, detail=str(error))
+        return HTTPException(404, detail={"code": "RESOURCE_NOT_FOUND", "message": str(error)})
     if isinstance(error, sqlite3.IntegrityError):
-        return HTTPException(409, detail="Resource already exists or violates a data constraint.")
+        return HTTPException(409, detail={
+            "code": "RESOURCE_CONFLICT", "message": "Resource state conflicts with the requested operation."
+        })
     if isinstance(error, (ValueError, ValidationError)):
-        return HTTPException(422, detail=str(error))
-    return HTTPException(500, detail="Finance Core could not complete the operation.")
+        return HTTPException(422, detail={"code": "INVALID_REQUEST", "message": str(error)})
+    return HTTPException(500, detail={
+        "code": "REQUEST_FAILED", "message": "Finance Core could not complete the operation."
+    })
+
+
+class LedgerContractRouter(APIRouter):
+    """Apply the v3 consumer contract to every reused workspace ledger route."""
+
+    def add_api_route(self, path: str, endpoint: Any, **kwargs: Any) -> None:
+        methods = {method.upper() for method in kwargs.get("methods") or ["GET"]}
+        write = bool(methods & {"POST", "PUT", "PATCH", "DELETE"}) and not path.endswith("/validate")
+        scope = "ledger:write" if write else "ledger:read"
+        extra = dict(kwargs.get("openapi_extra") or {})
+        extra.update({
+            "security": BEARER_OR_SESSION_SECURITY,
+            "x-fc-required-scope": scope,
+        })
+        kwargs["openapi_extra"] = extra
+        kwargs["responses"] = {**STANDARD_ERROR_RESPONSES, **(kwargs.get("responses") or {})}
+        if path == "/holdings" and "GET" in methods:
+            kwargs["response_model"] = HoldingsResponse
+        elif path == "/holdings/{holding_id}" and "GET" in methods:
+            kwargs["response_model"] = HoldingResponse
+        elif path == "/living-accounts/{account_id}" and "DELETE" in methods:
+            kwargs["response_model"] = LivingAccountDeleteResponse
+        elif path == "/export/journal-entries.csv":
+            kwargs["response_model"] = None
+            kwargs["response_class"] = Response
+            kwargs["responses"] = {
+                **kwargs["responses"],
+                200: {
+                    "description": "UTF-8 CSV export.",
+                    "content": {"text/csv": {"schema": {"$ref": "#/components/schemas/CsvDocument"}}},
+                },
+            }
+        else:
+            kwargs["response_model"] = LedgerResponse
+        kwargs["response_model_exclude_unset"] = True
+        super().add_api_route(path, endpoint, **kwargs)
 
 
 def create_v2_router(
@@ -47,7 +96,8 @@ def create_v2_router(
     service_version: str = "2.0.0",
     api_version: str = "2.0.0",
 ) -> APIRouter:
-    router = APIRouter(prefix=prefix, dependencies=dependencies or [])
+    router_type = LedgerContractRouter if prefix.startswith("/api/v3/workspaces/") else APIRouter
+    router = router_type(prefix=prefix, dependencies=dependencies or [])
 
     @router.get("/health")
     def health(request: Request) -> dict[str, Any]:
@@ -84,10 +134,13 @@ def create_v2_router(
     def undo(payload: UndoRequest, request: Request) -> dict[str, Any]:
         try:
             result = repo(request).undo(payload.undo_token)
-        except Exception as error:
-            raise translate(error) from error
+        except ValueError as error:
+            raise HTTPException(409, detail={"code": "UNDO_CONFLICT", "message": str(error)}) from error
         if result is None:
-            raise HTTPException(409, detail="Undo token is invalid, expired, consumed, or superseded.")
+            raise HTTPException(410, detail={
+                "code": "UNDO_EXPIRED",
+                "message": "Undo token is invalid, expired, consumed, or superseded.",
+            })
         return result
 
     @router.post("/batch")
@@ -169,6 +222,27 @@ def create_v2_router(
             return {"data": dump(repo(request).save_living_account(item, create=False))}
         except Exception as error:
             raise translate(error) from error
+
+    @router.delete("/living-accounts/{account_id}")
+    def delete_living_account(account_id: str, request: Request) -> dict[str, Any]:
+        result = repo(request).delete_living_account(account_id)
+        if result is None:
+            raise HTTPException(404, detail={
+                "code": "RESOURCE_NOT_FOUND", "message": "Living account was not found."
+            })
+        account, snapshot_count, undo = result
+        workspace_id = getattr(request.state, "workspace_id", None)
+        operation = {
+            **undo,
+            "operationId": str(uuid4()),
+            "workspaceId": workspace_id,
+            "operationType": "living-account.delete",
+        }
+        return {
+            "data": dump(account),
+            "deletedSnapshotCount": snapshot_count,
+            "undo": operation,
+        }
 
     @router.post("/living-accounts/{account_id}/record-balance")
     def record_living_balance(account_id: str, request: Request, balance: str = Body(embed=True)) -> dict[str, Any]:
@@ -406,6 +480,15 @@ def create_v2_router(
     @router.get("/holdings")
     def holdings(request: Request) -> dict[str, Any]:
         return {"data": repo(request).holdings(), "readOnly": True}
+
+    @router.get("/holdings/{holding_id}")
+    def get_holding(holding_id: str, request: Request) -> dict[str, Any]:
+        item = repo(request).get_holding(holding_id)
+        if item is None:
+            raise HTTPException(404, detail={
+                "code": "RESOURCE_NOT_FOUND", "message": "Holding was not found."
+            })
+        return {"data": item, "readOnly": True}
 
     @router.get("/t-accounts")
     def t_accounts(request: Request) -> dict[str, Any]:

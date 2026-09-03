@@ -10,6 +10,16 @@ from starlette.concurrency import run_in_threadpool
 
 from finance_core import __version__
 from finance_core.api_v2 import create_v2_router
+from finance_core.contracts_v3 import (
+    BEARER_OR_SESSION_SECURITY,
+    HealthResponse,
+    LedgerResponse,
+    MeResponse,
+    SESSION_SECURITY,
+    STANDARD_ERROR_RESPONSES,
+    WorkspaceListResponse,
+    WorkspaceMutationResponse,
+)
 from finance_core.registry import Actor, OWNER_USER_ID, REGISTRY_SCHEMA_VERSION, Registry
 
 
@@ -113,7 +123,7 @@ async def workspace_context(
 def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
     router = APIRouter(prefix="/api/v3")
 
-    @router.get("/health")
+    @router.get("/health", response_model=HealthResponse)
     def health(request: Request) -> dict[str, Any]:
         store = registry(request)
         store.connection.execute("SELECT 1").fetchone()
@@ -121,10 +131,12 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
             "status": "ok",
             "service": "finance-core",
             "serviceVersion": __version__,
-            "apiVersion": "3.0.0",
+            "apiVersion": "3.1.0",
             "ledgerSchemaVersion": 2,
             "registrySchemaVersion": REGISTRY_SCHEMA_VERSION,
-            "supportedApiVersions": ["3.0.0"],
+            "supportedApiVersions": ["3.0.0", "3.1.0"],
+            "buildCommit": request.app.state.build_commit,
+            "releaseCommit": request.app.state.release_commit,
             "capabilities": [
                 "workspace-vaults", "workspace-scoped-api", "scoped-access-tokens",
                 "reversible-business-cud", "reversible-workspace-quarantine",
@@ -132,7 +144,10 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
             ],
         }
 
-    @router.post("/session")
+    @router.post(
+        "/session", response_model=LedgerResponse, response_model_exclude_unset=True,
+        responses=STANDARD_ERROR_RESPONSES,
+    )
     def create_session(payload: SessionRequest, response: Response, request: Request) -> dict[str, Any]:
         require_local_origin(request)
         try:
@@ -145,7 +160,11 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
         )
         return {"data": metadata}
 
-    @router.delete("/session")
+    @router.delete(
+        "/session", response_model=LedgerResponse, response_model_exclude_unset=True,
+        responses=STANDARD_ERROR_RESPONSES,
+        openapi_extra={"security": SESSION_SECURITY},
+    )
     def delete_session(
         request: Request, response: Response,
         session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
@@ -155,7 +174,10 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
         response.delete_cookie(SESSION_COOKIE, path="/api/v3")
         return {"signedOut": True}
 
-    @router.get("/me")
+    @router.get(
+        "/me", response_model=MeResponse, responses=STANDARD_ERROR_RESPONSES,
+        openapi_extra={"security": BEARER_OR_SESSION_SECURITY},
+    )
     def me(actor: Actor = Depends(authenticate)) -> dict[str, Any]:
         return {
             "data": {
@@ -166,11 +188,17 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
             }
         }
 
-    @router.get("/workspaces")
+    @router.get(
+        "/workspaces", response_model=WorkspaceListResponse, responses=STANDARD_ERROR_RESPONSES,
+        openapi_extra={"security": BEARER_OR_SESSION_SECURITY},
+    )
     def list_workspaces(request: Request, actor: Actor = Depends(authenticate)) -> dict[str, Any]:
         return {"data": registry(request).list_workspaces(actor)}
 
-    @router.post("/workspaces", status_code=201)
+    @router.post(
+        "/workspaces", status_code=201, response_model=WorkspaceMutationResponse,
+        responses=STANDARD_ERROR_RESPONSES, openapi_extra={"security": SESSION_SECURITY},
+    )
     def create_workspace(
         payload: WorkspaceCreate, request: Request, actor: Actor = Depends(require_admin),
     ) -> dict[str, Any]:
@@ -181,7 +209,10 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
         registry(request).audit(str(uuid4()), actor, workspace["id"], "workspace.create", "success")
         return {"data": workspace, "undo": undo}
 
-    @router.patch("/workspaces/{workspace_id}")
+    @router.patch(
+        "/workspaces/{workspace_id}", response_model=WorkspaceMutationResponse,
+        responses=STANDARD_ERROR_RESPONSES, openapi_extra={"security": SESSION_SECURITY},
+    )
     def update_workspace(
         workspace_id: str, payload: WorkspaceUpdate, request: Request,
         actor: Actor = Depends(require_admin),
@@ -197,7 +228,10 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
         registry(request).audit(str(uuid4()), actor, workspace_id, "workspace.update", "success")
         return {"data": workspace, "undo": undo}
 
-    @router.delete("/workspaces/{workspace_id}")
+    @router.delete(
+        "/workspaces/{workspace_id}", response_model=WorkspaceMutationResponse,
+        responses=STANDARD_ERROR_RESPONSES, openapi_extra={"security": SESSION_SECURITY},
+    )
     def delete_workspace(
         workspace_id: str, request: Request, actor: Actor = Depends(require_admin),
     ) -> dict[str, Any]:
@@ -210,11 +244,18 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
         registry(request).audit(str(uuid4()), actor, workspace_id, "workspace.quarantine", "success")
         return {"data": workspace, "undo": undo}
 
-    @router.get("/access-tokens")
+    @router.get(
+        "/access-tokens", response_model=LedgerResponse, response_model_exclude_unset=True,
+        responses=STANDARD_ERROR_RESPONSES,
+        openapi_extra={"security": SESSION_SECURITY},
+    )
     def list_tokens(request: Request, _actor: Actor = Depends(require_admin)) -> dict[str, Any]:
         return {"data": registry(request).list_access_tokens()}
 
-    @router.post("/access-tokens", status_code=201)
+    @router.post(
+        "/access-tokens", status_code=201, response_model=LedgerResponse, response_model_exclude_unset=True,
+        responses=STANDARD_ERROR_RESPONSES, openapi_extra={"security": SESSION_SECURITY},
+    )
     def create_token(
         payload: AccessTokenCreate, request: Request, actor: Actor = Depends(require_admin),
     ) -> dict[str, Any]:
@@ -232,7 +273,10 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
         registry(request).audit(str(uuid4()), actor, None, "access-token.create", "success")
         return {"data": metadata, "token": secret, "displayOnce": True}
 
-    @router.post("/access-tokens/{token_id}/revoke")
+    @router.post(
+        "/access-tokens/{token_id}/revoke", response_model=LedgerResponse, response_model_exclude_unset=True,
+        responses=STANDARD_ERROR_RESPONSES, openapi_extra={"security": SESSION_SECURITY},
+    )
     def revoke_token(
         token_id: str, request: Request, actor: Actor = Depends(require_admin),
     ) -> dict[str, Any]:
@@ -243,7 +287,11 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
         registry(request).audit(str(uuid4()), actor, None, "access-token.revoke", "success")
         return {"data": item}
 
-    @router.get("/undo/latest")
+    @router.get(
+        "/undo/latest", response_model=LedgerResponse, response_model_exclude_unset=True,
+        responses=STANDARD_ERROR_RESPONSES,
+        openapi_extra={"security": BEARER_OR_SESSION_SECURITY, "x-fc-required-scope": "ledger:read"},
+    )
     async def latest_undo(
         workspace_id: str, request: Request, actor: Actor = Depends(authenticate),
     ) -> dict[str, Any]:
@@ -255,7 +303,11 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
             item = await run_in_threadpool(handle.repository.latest_undo)
         return {"data": ({**item, "workspaceId": workspace_id, "operationId": item["undoToken"]} if item else None)}
 
-    @router.post("/undo")
+    @router.post(
+        "/undo", response_model=LedgerResponse, response_model_exclude_unset=True,
+        responses=STANDARD_ERROR_RESPONSES,
+        openapi_extra={"security": BEARER_OR_SESSION_SECURITY, "x-fc-required-scope": "ledger:write"},
+    )
     async def undo(
         payload: V3UndoRequest, request: Request, actor: Actor = Depends(authenticate),
     ) -> dict[str, Any]:
@@ -286,7 +338,7 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
     scoped = create_v2_router(
         prefix="/api/v3/workspaces/{workspace_id}",
         dependencies=[Depends(workspace_context)],
-        service_version="3.0.0",
-        api_version="3.0.0",
+        service_version="3.1.0",
+        api_version="3.1.0",
     )
     return router, scoped

@@ -1,6 +1,6 @@
 {
   "name": "finance-core",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,9 @@
     "dev:demo": "vite --host 127.0.0.1 --port 5174",
     "test": "uv run --offline --no-sync --project backend --cache-dir .tmp/uv-cache pytest -q -p no:cacheprovider",
     "build": "vite build",
-    "check:versions": "uv run --offline --no-sync --project backend --cache-dir .tmp/uv-cache python -m finance_core.version_check"
+    "check:versions": "uv run --offline --no-sync --project backend --cache-dir .tmp/uv-cache python -m finance_core.version_check",
+    "check:release": "uv run --offline --no-sync --project backend --cache-dir .tmp/uv-cache python -m finance_core.release_artifact --check",
+    "build:release": "uv run --offline --no-sync --project backend --cache-dir .tmp/uv-cache python -m finance_core.release_artifact"
   },
   "devDependencies": {
     "concurrently": "^10.0.4",
