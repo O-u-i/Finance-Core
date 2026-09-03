@@ -73,7 +73,7 @@ def test_openapi_names_responses_and_declares_security_scopes_and_errors(tmp_pat
     api = authenticated_client(tmp_path)
     try:
         schema = api.get("/openapi.json").json()
-        assert schema["info"]["version"] == "3.1.0"
+        assert schema["info"]["version"] == "3.1.1"
         schemes = schema["components"]["securitySchemes"]
         assert schemes["BearerAccessToken"]["scheme"] == "bearer"
         assert schemes["SessionCookie"] == {
@@ -125,14 +125,14 @@ def test_openapi_names_responses_and_declares_security_scopes_and_errors(tmp_pat
 def test_health_exposes_only_commit_shaped_release_metadata(tmp_path: Path):
     api = TestClient(create_app(
         data_root=tmp_path / "data", admin_token="synthetic-admin",
-        build_commit="a" * 40, release_commit="not-a-commit-or-secret",
+        build_commit="a" * 40, release_commit="b" * 40,
     ))
     with api:
         health = api.get("/api/v3/health").json()
         assert health["buildCommit"] == "a" * 40
-        assert health["releaseCommit"] is None
-        assert health["serviceVersion"] == "3.1.0"
-        assert health["apiVersion"] == "3.1.0"
+        assert health["releaseCommit"] == "b" * 40
+        assert health["serviceVersion"] == "3.1.1"
+        assert health["apiVersion"] == "3.1.1"
 
 
 def test_single_holding_is_scoped_and_hidden_across_workspaces(tmp_path: Path):

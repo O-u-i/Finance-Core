@@ -4,6 +4,18 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from finance_core.models_v2 import (
+    Account,
+    Commodity,
+    JournalEntryDraft,
+    LivingAccountV2,
+    LivingSnapshotV2,
+    LotAllocation,
+    MonthlyPlanV2,
+    PriceQuote,
+    RecurringEntryRule,
+)
+
 
 class ContractModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
@@ -153,3 +165,307 @@ class LivingAccountDeleteResponse(FlexibleContractModel):
     deleted_snapshot_count: int = Field(alias="deletedSnapshotCount", ge=0)
     undo: UndoOperation
     workspace_id: str | None = Field(default=None, alias="workspaceId")
+
+
+class WorkspaceLedgerResponse(ContractModel):
+    workspace_id: str = Field(alias="workspaceId")
+
+
+class ReversibleWorkspaceLedgerResponse(WorkspaceLedgerResponse):
+    undo: UndoOperation | None = None
+
+
+class DraftRecord(ContractModel):
+    draft: JournalEntryDraft
+    status: Literal["draft", "posted"]
+    created_at: str = Field(alias="createdAt")
+    updated_at: str = Field(alias="updatedAt")
+    posted_entry_id: str | None = Field(alias="postedEntryId")
+
+
+class ValidationIssue(ContractModel):
+    code: str
+    severity: Literal["error", "warning"]
+    path: str
+    message: str
+    details: dict[str, str]
+
+
+class CompletedPosting(ContractModel):
+    id: str
+    account_id: str = Field(alias="accountId")
+    side: Literal["debit", "credit"]
+    units: str
+    commodity_code: str = Field(alias="commodityCode")
+    valuation_rate: str = Field(alias="valuationRate")
+    valuation_amount: str = Field(alias="valuationAmount")
+    rate_type: Literal["exchange", "price", "cost"] = Field(alias="rateType")
+    memo: str
+    cash_flow_category: Literal[
+        "income", "expense", "investment", "financing", "transfer", "other"
+    ] = Field(alias="cashFlowCategory")
+    lot_action: Literal["acquire", "dispose"] | None = Field(default=None, alias="lotAction")
+    lot_id: str | None = Field(default=None, alias="lotId")
+    lot_allocations: list[LotAllocation] = Field(default_factory=list, alias="lotAllocations")
+    action: Literal["reversal"] | None = None
+    of_posting_id: str | None = Field(default=None, alias="ofPostingId")
+
+
+class JournalEntry(ContractModel):
+    id: str
+    date: str
+    description: str
+    payee: str
+    source: str
+    reference: str
+    tags: list[str]
+    balancing_commodity_code: str = Field(alias="balancingCommodityCode")
+    postings: list[CompletedPosting] = Field(min_length=2, max_length=200)
+    posted_at: str | None = Field(default=None, alias="postedAt")
+    reversal_of: str | None = Field(default=None, alias="reversalOf")
+    debit_total: str | None = Field(default=None, alias="debitTotal")
+    credit_total: str | None = Field(default=None, alias="creditTotal")
+    difference: str | None = None
+
+
+class DraftValidationResponse(WorkspaceLedgerResponse):
+    valid: bool
+    issues: list[ValidationIssue]
+    preview: JournalEntry | None
+
+
+class DraftListResponse(WorkspaceLedgerResponse):
+    data: list[DraftRecord]
+
+
+class DraftSingleResponse(WorkspaceLedgerResponse):
+    data: DraftRecord
+
+
+class DraftMutationResponse(ReversibleWorkspaceLedgerResponse):
+    data: DraftRecord
+
+
+class DraftDeleteResponse(ReversibleWorkspaceLedgerResponse):
+    deleted: Literal[True]
+    id: str
+
+
+class CompletedPostingResponse(WorkspaceLedgerResponse):
+    posted: Literal[True]
+    entry: JournalEntry
+    issues: list[ValidationIssue]
+
+
+class JournalEntryListResponse(WorkspaceLedgerResponse):
+    data: list[JournalEntry]
+
+
+class JournalEntrySingleResponse(WorkspaceLedgerResponse):
+    data: JournalEntry
+
+
+class JournalEntryReversalResponse(WorkspaceLedgerResponse):
+    data: JournalEntry
+
+
+class CommodityListResponse(WorkspaceLedgerResponse):
+    data: list[Commodity]
+
+
+class CommodityMutationResponse(ReversibleWorkspaceLedgerResponse):
+    data: Commodity
+
+
+class AccountListResponse(WorkspaceLedgerResponse):
+    data: list[Account]
+
+
+class AccountMutationResponse(ReversibleWorkspaceLedgerResponse):
+    data: Account
+
+
+class PriceQuoteListResponse(WorkspaceLedgerResponse):
+    data: list[PriceQuote]
+
+
+class PriceQuoteMutationResponse(ReversibleWorkspaceLedgerResponse):
+    data: PriceQuote
+
+
+class PriceQuoteDeleteResponse(ReversibleWorkspaceLedgerResponse):
+    deleted: Literal[True]
+    id: str
+
+
+class TAccount(ContractModel):
+    account_id: str = Field(alias="accountId")
+    account_code: str = Field(alias="accountCode")
+    account_name: str = Field(alias="accountName")
+    account_type: Literal["asset", "liability", "equity", "income", "expense"] = Field(alias="accountType")
+    commodity_code: str = Field(alias="commodityCode")
+    debit: str
+    credit: str
+    balance: str
+    count: int = Field(ge=0)
+
+
+class TAccountListResponse(WorkspaceLedgerResponse):
+    data: list[TAccount]
+
+
+class DashboardCommoditySummary(ContractModel):
+    commodity_code: str = Field(alias="commodityCode")
+    cash: str
+    holding_cost_basis: str = Field(alias="holdingCostBasis")
+    holding_market_value: str = Field(alias="holdingMarketValue")
+    book_value: str = Field(alias="bookValue")
+    market_value: str = Field(alias="marketValue")
+    unrealized_pnl: str = Field(alias="unrealizedPnL")
+    realized_pnl: str = Field(alias="realizedPnL")
+    missing_price_count: int = Field(alias="missingPriceCount", ge=0)
+
+
+class DashboardFormulas(ContractModel):
+    account_balance: str = Field(alias="accountBalance")
+    holding_cost_basis: str = Field(alias="holdingCostBasis")
+    holding_market_value: str = Field(alias="holdingMarketValue")
+
+
+class Dashboard(ContractModel):
+    entry_count: int = Field(alias="entryCount", ge=0)
+    draft_count: int = Field(alias="draftCount", ge=0)
+    open_lot_count: int = Field(alias="openLotCount", ge=0)
+    commodity_summaries: list[DashboardCommoditySummary] = Field(alias="commoditySummaries")
+    formulas: DashboardFormulas
+    assumptions: list[str]
+
+
+class DashboardResponse(WorkspaceLedgerResponse):
+    data: Dashboard
+
+
+class FinancialStatement(ContractModel):
+    commodity_code: str = Field(alias="commodityCode")
+    assets: str
+    liabilities: str
+    equity: str
+    income: str
+    expenses: str
+    net_income: str = Field(alias="netIncome")
+
+
+class FinancialStatementListResponse(WorkspaceLedgerResponse):
+    data: list[FinancialStatement]
+
+
+class CashFlowItem(ContractModel):
+    commodity_code: str = Field(alias="commodityCode")
+    category: Literal["income", "expense", "investment", "financing", "transfer", "other"]
+    amount: str
+
+
+class CashFlowResponse(WorkspaceLedgerResponse):
+    data: list[CashFlowItem]
+
+
+class ReconciliationCheck(ContractModel):
+    id: Literal["entry-balance", "lot-conservation", "foreign-keys", "price-availability"]
+    status: Literal["pass", "warning", "error"]
+    detail: str
+
+
+class Reconciliation(ContractModel):
+    status: Literal["pass", "error"]
+    checks: list[ReconciliationCheck]
+
+
+class ReconciliationResponse(WorkspaceLedgerResponse):
+    data: Reconciliation
+
+
+class LivingAccountListResponse(WorkspaceLedgerResponse):
+    data: list[LivingAccountV2]
+
+
+class LivingAccountMutationResponse(ReversibleWorkspaceLedgerResponse):
+    data: LivingAccountV2
+
+
+class LivingSnapshotListResponse(WorkspaceLedgerResponse):
+    data: list[LivingSnapshotV2]
+
+
+class LivingBalanceMutationResponse(ReversibleWorkspaceLedgerResponse):
+    data: LivingAccountV2
+    snapshot: LivingSnapshotV2
+
+
+class MonthlyPlanListResponse(WorkspaceLedgerResponse):
+    data: list[MonthlyPlanV2]
+
+
+class MonthlyPlanMutationResponse(ReversibleWorkspaceLedgerResponse):
+    data: MonthlyPlanV2
+
+
+class MonthlyPlanDeleteResponse(ReversibleWorkspaceLedgerResponse):
+    deleted: Literal[True]
+    id: str
+
+
+class RecurringEntryRuleListResponse(WorkspaceLedgerResponse):
+    data: list[RecurringEntryRule]
+
+
+class RecurringEntryRuleMutationResponse(ReversibleWorkspaceLedgerResponse):
+    data: RecurringEntryRule
+
+
+class RecurringEntryRuleDeleteResponse(ReversibleWorkspaceLedgerResponse):
+    deleted: Literal[True]
+    id: str
+
+
+class WorldCommoditySummary(ContractModel):
+    commodity_code: str = Field(alias="commodityCode")
+    living_balance: str = Field(alias="livingBalance")
+    investment_market_value: str = Field(alias="investmentMarketValue")
+    combined_value: str = Field(alias="combinedValue")
+    expected_income: str = Field(alias="expectedIncome")
+    expected_expense: str = Field(alias="expectedExpense")
+    expected_net: str = Field(alias="expectedNet")
+
+
+class WorldBalancePoint(ContractModel):
+    recorded_at: str = Field(alias="recordedAt")
+    value: str
+    delta: str
+
+
+class WorldBalanceSeries(ContractModel):
+    commodity_code: str = Field(alias="commodityCode")
+    points: list[WorldBalancePoint]
+
+
+class World(ContractModel):
+    commodity_summaries: list[WorldCommoditySummary] = Field(alias="commoditySummaries")
+    balance_series: list[WorldBalanceSeries] = Field(alias="balanceSeries")
+
+
+class WorldResponse(WorkspaceLedgerResponse):
+    data: World
+
+
+class LatestUndo(ContractModel):
+    undo_token: str = Field(alias="undoToken")
+    expires_at: str = Field(alias="expiresAt")
+
+
+class LatestUndoResponse(WorkspaceLedgerResponse):
+    data: LatestUndo | None
+
+
+class LedgerUndoResponse(WorkspaceLedgerResponse):
+    undone: Literal[True]
+    undo_token: str = Field(alias="undoToken")

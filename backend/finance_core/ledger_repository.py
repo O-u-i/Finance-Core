@@ -278,7 +278,13 @@ class LedgerRepository:
                 (draft.id, json.dumps(dump(draft), ensure_ascii=False, separators=(",", ":")), "draft", timestamp, timestamp),
             )
             self._save_undo(before)
-        return {"draft": dump(draft), "status": "draft", "createdAt": timestamp, "updatedAt": timestamp}
+        return {
+            "draft": dump(draft),
+            "status": "draft",
+            "createdAt": timestamp,
+            "updatedAt": timestamp,
+            "postedEntryId": None,
+        }
 
     def update_draft(self, draft_id: str, draft: JournalEntryDraft) -> dict[str, Any]:
         if draft.id != draft_id:

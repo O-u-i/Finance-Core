@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import csv
 import io
+import inspect
 import json
 import sqlite3
 from datetime import date
+from functools import wraps
 from typing import Any
 from uuid import uuid4
 
@@ -12,12 +14,46 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 from pydantic import ValidationError
 
 from finance_core.contracts_v3 import (
+    AccountListResponse,
+    AccountMutationResponse,
     BEARER_OR_SESSION_SECURITY,
+    CashFlowResponse,
+    CommodityListResponse,
+    CommodityMutationResponse,
+    CompletedPostingResponse,
+    DashboardResponse,
+    DraftDeleteResponse,
+    DraftListResponse,
+    DraftMutationResponse,
+    DraftSingleResponse,
+    DraftValidationResponse,
+    FinancialStatementListResponse,
     HoldingResponse,
     HoldingsResponse,
+    JournalEntryListResponse,
+    JournalEntryReversalResponse,
+    JournalEntrySingleResponse,
+    LatestUndoResponse,
     LedgerResponse,
+    LedgerUndoResponse,
+    LivingAccountListResponse,
+    LivingAccountMutationResponse,
+    LivingBalanceMutationResponse,
     LivingAccountDeleteResponse,
+    LivingSnapshotListResponse,
+    MonthlyPlanDeleteResponse,
+    MonthlyPlanListResponse,
+    MonthlyPlanMutationResponse,
+    PriceQuoteDeleteResponse,
+    PriceQuoteListResponse,
+    PriceQuoteMutationResponse,
+    ReconciliationResponse,
+    RecurringEntryRuleDeleteResponse,
+    RecurringEntryRuleListResponse,
+    RecurringEntryRuleMutationResponse,
     STANDARD_ERROR_RESPONSES,
+    TAccountListResponse,
+    WorldResponse,
 )
 from finance_core.ledger_repository import LedgerRepository, dump
 from finance_core.models import UndoRequest
@@ -67,6 +103,49 @@ class LedgerContractRouter(APIRouter):
         })
         kwargs["openapi_extra"] = extra
         kwargs["responses"] = {**STANDARD_ERROR_RESPONSES, **(kwargs.get("responses") or {})}
+        method = next(iter(methods))
+        response_models: dict[tuple[str, str], Any] = {
+            ("/commodities", "GET"): CommodityListResponse,
+            ("/commodities", "POST"): CommodityMutationResponse,
+            ("/commodities/{code}", "PUT"): CommodityMutationResponse,
+            ("/accounts", "GET"): AccountListResponse,
+            ("/accounts", "POST"): AccountMutationResponse,
+            ("/accounts/{account_id}", "PUT"): AccountMutationResponse,
+            ("/price-quotes", "GET"): PriceQuoteListResponse,
+            ("/price-quotes", "POST"): PriceQuoteMutationResponse,
+            ("/price-quotes/{quote_id}", "DELETE"): PriceQuoteDeleteResponse,
+            ("/living-accounts", "GET"): LivingAccountListResponse,
+            ("/living-accounts", "POST"): LivingAccountMutationResponse,
+            ("/living-accounts/{account_id}", "PUT"): LivingAccountMutationResponse,
+            ("/living-accounts/{account_id}/record-balance", "POST"): LivingBalanceMutationResponse,
+            ("/living-snapshots", "GET"): LivingSnapshotListResponse,
+            ("/monthly-plans", "GET"): MonthlyPlanListResponse,
+            ("/monthly-plans", "POST"): MonthlyPlanMutationResponse,
+            ("/monthly-plans/{plan_id}", "PUT"): MonthlyPlanMutationResponse,
+            ("/monthly-plans/{plan_id}", "DELETE"): MonthlyPlanDeleteResponse,
+            ("/journal-entry-drafts", "GET"): DraftListResponse,
+            ("/journal-entry-drafts", "POST"): DraftMutationResponse,
+            ("/journal-entry-drafts/{draft_id}", "GET"): DraftSingleResponse,
+            ("/journal-entry-drafts/{draft_id}", "PUT"): DraftMutationResponse,
+            ("/journal-entry-drafts/{draft_id}", "DELETE"): DraftDeleteResponse,
+            ("/journal-entry-drafts/{draft_id}/validate", "POST"): DraftValidationResponse,
+            ("/journal-entry-drafts/{draft_id}/post", "POST"): CompletedPostingResponse,
+            ("/journal-entries", "GET"): JournalEntryListResponse,
+            ("/journal-entries/{entry_id}", "GET"): JournalEntrySingleResponse,
+            ("/journal-entries/{entry_id}/reverse", "POST"): JournalEntryReversalResponse,
+            ("/recurring-entry-rules", "GET"): RecurringEntryRuleListResponse,
+            ("/recurring-entry-rules", "POST"): RecurringEntryRuleMutationResponse,
+            ("/recurring-entry-rules/{rule_id}", "PUT"): RecurringEntryRuleMutationResponse,
+            ("/recurring-entry-rules/{rule_id}", "DELETE"): RecurringEntryRuleDeleteResponse,
+            ("/t-accounts", "GET"): TAccountListResponse,
+            ("/dashboard", "GET"): DashboardResponse,
+            ("/financial-statements", "GET"): FinancialStatementListResponse,
+            ("/cash-flow", "GET"): CashFlowResponse,
+            ("/reconciliation", "GET"): ReconciliationResponse,
+            ("/world", "GET"): WorldResponse,
+            ("/undo/latest", "GET"): LatestUndoResponse,
+            ("/undo", "POST"): LedgerUndoResponse,
+        }
         if path == "/holdings" and "GET" in methods:
             kwargs["response_model"] = HoldingsResponse
         elif path == "/holdings/{holding_id}" and "GET" in methods:
@@ -83,10 +162,30 @@ class LedgerContractRouter(APIRouter):
                     "content": {"text/csv": {"schema": {"$ref": "#/components/schemas/CsvDocument"}}},
                 },
             }
+        elif (path, method) in response_models:
+            kwargs["response_model"] = response_models[(path, method)]
         else:
             kwargs["response_model"] = LedgerResponse
         kwargs["response_model_exclude_unset"] = True
-        super().add_api_route(path, endpoint, **kwargs)
+
+        if inspect.iscoroutinefunction(endpoint):
+            @wraps(endpoint)
+            async def workspace_endpoint(*args: Any, **call_kwargs: Any) -> Any:
+                result = await endpoint(*args, **call_kwargs)
+                request = call_kwargs.get("request")
+                if isinstance(result, dict) and request is not None:
+                    return {**result, "workspaceId": request.state.workspace_id}
+                return result
+        else:
+            @wraps(endpoint)
+            def workspace_endpoint(*args: Any, **call_kwargs: Any) -> Any:
+                result = endpoint(*args, **call_kwargs)
+                request = call_kwargs.get("request")
+                if isinstance(result, dict) and request is not None:
+                    return {**result, "workspaceId": request.state.workspace_id}
+                return result
+
+        super().add_api_route(path, workspace_endpoint, **kwargs)
 
 
 def create_v2_router(
