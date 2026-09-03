@@ -92,7 +92,7 @@ def create_and_post(api: TestClient, payload: dict) -> dict:
 def test_health_and_decimal_aggregate_lifecycle(tmp_path: Path):
     with client(tmp_path) as api:
         health = api.get("/api/v2/health").json()
-        assert health["apiVersion"] == "3.0.0"
+        assert health["apiVersion"] == "3.1.0"
         assert health["ledgerSchemaVersion"] == 2
         seed(api)
         payload = opening_draft()
@@ -261,7 +261,9 @@ def test_v2_single_use_undo_and_post_invalidation(tmp_path: Path):
         token = api.get("/api/v2/undo/latest").json()["data"]["undoToken"]
         assert api.post("/api/v2/undo", json={"undoToken": token}).status_code == 200
         assert api.get("/api/v2/commodities").json()["data"] == []
-        assert api.post("/api/v2/undo", json={"undoToken": token}).status_code == 409
+        expired = api.post("/api/v2/undo", json={"undoToken": token})
+        assert expired.status_code == 410
+        assert expired.json()["error"]["code"] == "UNDO_EXPIRED"
 
         seed(api)
         assert api.post("/api/v2/journal-entry-drafts", json=opening_draft()).status_code == 201

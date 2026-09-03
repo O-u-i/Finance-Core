@@ -203,6 +203,20 @@ class LedgerRepository:
             self._save_undo(before)
         return updated, snapshot
 
+    def delete_living_account(self, account_id: str) -> tuple[LivingAccountV2, int, dict[str, str]] | None:
+        account = next((item for item in self.list_living_accounts() if item.id == account_id), None)
+        if account is None:
+            return None
+        before = self._mutable_snapshot()
+        with transaction(self.connection):
+            snapshot_count = self.connection.execute(
+                "SELECT COUNT(*) FROM living_snapshots_v2 WHERE account_id=?", (account_id,)
+            ).fetchone()[0]
+            self.connection.execute("DELETE FROM living_snapshots_v2 WHERE account_id=?", (account_id,))
+            self.connection.execute("DELETE FROM living_accounts_v2 WHERE id=?", (account_id,))
+            undo = self._save_undo(before)
+        return account, snapshot_count, undo
+
     def list_monthly_plans(self) -> list[MonthlyPlanV2]:
         rows = self.connection.execute("SELECT * FROM monthly_plans_v2 ORDER BY kind,start_date,id").fetchall()
         return [MonthlyPlanV2.model_validate({
@@ -603,6 +617,9 @@ class LedgerRepository:
                 "unrealizedPnL": unrealized,
             })
         return result
+
+    def get_holding(self, holding_id: str) -> dict[str, Any] | None:
+        return next((item for item in self.holdings() if item["lotId"] == holding_id), None)
 
     def dashboard(self) -> dict[str, Any]:
         flows = self.account_flows()

@@ -5,9 +5,11 @@ import re
 import tomllib
 from pathlib import Path
 
+from finance_core.release_artifact import check as check_release_artifacts
+
 
 ROOT = Path(__file__).resolve().parents[2]
-EXPECTED = "3.0.0"
+EXPECTED = "3.1.0"
 
 
 def main() -> None:
@@ -30,10 +32,12 @@ def main() -> None:
     for name, text in (("index.html", index_text), ("README.md", readme)):
         if EXPECTED not in text:
             raise SystemExit(f"{name} does not display {EXPECTED}.")
-    horizon = ROOT / "docs" / "pdf" / f"finance-core-v{EXPECTED}-horizon.pdf"
+    major_horizon = f"{EXPECTED.split('.', 1)[0]}.0.0"
+    horizon = ROOT / "docs" / "pdf" / f"finance-core-v{major_horizon}-horizon.pdf"
     if not horizon.is_file() or horizon.stat().st_size < 10_000:
         raise SystemExit(f"Major release Horizon PDF is missing or unexpectedly small: {horizon.name}")
-    print(f"Finance Core version surfaces and Horizon PDF are synchronized at {EXPECTED}.")
+    check_release_artifacts()
+    print(f"Finance Core version surfaces are synchronized at {EXPECTED}; Horizon baseline is {major_horizon}.")
 
 
 if __name__ == "__main__":
