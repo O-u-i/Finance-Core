@@ -2,12 +2,46 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from finance_core.database import connect
 from finance_core.main import create_app
 
 
-def client(tmp_path: Path) -> TestClient:
-    return TestClient(create_app(connection=connect(tmp_path / "v2.sqlite3")))
+class ScopedClient:
+    def __init__(self, data_root: Path):
+        self.api = TestClient(create_app(data_root=data_root, admin_token="test-admin"))
+        self.prefix = ""
+
+    def __enter__(self):
+        self.api.__enter__()
+        assert self.api.post("/api/v3/session", json={"adminToken": "test-admin"}).status_code == 200
+        response = self.api.post("/api/v3/workspaces", json={"displayName": "Test", "kind": "sandbox"})
+        assert response.status_code == 201, response.text
+        self.prefix = f"/api/v3/workspaces/{response.json()['data']['id']}"
+        return self
+
+    def __exit__(self, *args):
+        return self.api.__exit__(*args)
+
+    def _path(self, path: str) -> str:
+        return self.prefix + path[len("/api/v2"):] if path.startswith("/api/v2") else path
+
+    def get(self, path: str, **kwargs):
+        return self.api.get(self._path(path), **kwargs)
+
+    def post(self, path: str, **kwargs):
+        return self.api.post(self._path(path), **kwargs)
+
+    def put(self, path: str, **kwargs):
+        return self.api.put(self._path(path), **kwargs)
+
+    def patch(self, path: str, **kwargs):
+        return self.api.patch(self._path(path), **kwargs)
+
+    def delete(self, path: str, **kwargs):
+        return self.api.delete(self._path(path), **kwargs)
+
+
+def client(tmp_path: Path) -> ScopedClient:
+    return ScopedClient(tmp_path / "v3-data")
 
 
 COMMODITIES = [
@@ -58,8 +92,8 @@ def create_and_post(api: TestClient, payload: dict) -> dict:
 def test_health_and_decimal_aggregate_lifecycle(tmp_path: Path):
     with client(tmp_path) as api:
         health = api.get("/api/v2/health").json()
-        assert health["apiVersion"] == "2.0.0"
-        assert health["schemaVersion"] == 2
+        assert health["apiVersion"] == "3.0.0"
+        assert health["ledgerSchemaVersion"] == 2
         seed(api)
         payload = opening_draft()
         assert api.post("/api/v2/journal-entry-drafts", json=payload).status_code == 201
@@ -204,20 +238,19 @@ def test_living_world_uses_decimal_strings(tmp_path: Path):
 
 
 def test_hashed_backup_restores_only_into_empty_v2_ledger(tmp_path: Path):
-    source_path = tmp_path / "source.sqlite3"
-    with TestClient(create_app(connection=connect(source_path))) as source:
+    with client(tmp_path / "source") as source:
         seed(source)
         assert source.post("/api/v2/journal-entry-drafts", json=opening_draft()).status_code == 201
         backup = source.get("/api/v2/backup").json()["data"]
         assert len(backup["sha256"]) == 64
-    with TestClient(create_app(connection=connect(tmp_path / "target.sqlite3"))) as target:
+    with client(tmp_path / "target") as target:
         restored = target.post("/api/v2/backup/restore", json=backup)
         assert restored.status_code == 201, restored.text
         assert len(target.get("/api/v2/commodities").json()["data"]) == 3
         assert len(target.get("/api/v2/journal-entry-drafts").json()["data"]) == 1
         assert target.post("/api/v2/backup/restore", json=backup).status_code == 422
     tampered = {**backup, "sha256": "0" * 64}
-    with TestClient(create_app(connection=connect(tmp_path / "tampered.sqlite3"))) as target:
+    with client(tmp_path / "tampered") as target:
         assert target.post("/api/v2/backup/restore", json=tampered).status_code == 422
 
 
@@ -316,9 +349,10 @@ def test_openapi_contract_keeps_ledger_writes_bounded(tmp_path: Path):
         posting = spec["components"]["schemas"]["PostingDraft"]["properties"]
         assert posting["units"]["type"] == "string"
         assert posting["valuationRate"]["anyOf"][0]["type"] == "string"
-        assert set(spec["paths"]["/api/v2/holdings"]) == {"get"}
-        assert set(spec["paths"]["/api/v2/journal-entries/{entry_id}"]) == {"get"}
-        assert "post" in spec["paths"]["/api/v2/journal-entry-drafts/{draft_id}/post"]
+        prefix = "/api/v3/workspaces/{workspace_id}"
+        assert set(spec["paths"][f"{prefix}/holdings"]) == {"get"}
+        assert set(spec["paths"][f"{prefix}/journal-entries/{{entry_id}}"]) == {"get"}
+        assert "post" in spec["paths"][f"{prefix}/journal-entry-drafts/{{draft_id}}/post"]
 
 
 def test_csv_import_creates_validated_draft_only(tmp_path: Path):
@@ -358,18 +392,17 @@ def test_living_world_uses_decimal_strings(tmp_path: Path):
 
 
 def test_hashed_backup_restores_only_into_empty_v2_ledger(tmp_path: Path):
-    source_path = tmp_path / "source.sqlite3"
-    with TestClient(create_app(connection=connect(source_path))) as source:
+    with client(tmp_path / "source-duplicate") as source:
         seed(source)
         assert source.post("/api/v2/journal-entry-drafts", json=opening_draft()).status_code == 201
         backup = source.get("/api/v2/backup").json()["data"]
         assert len(backup["sha256"]) == 64
-    with TestClient(create_app(connection=connect(tmp_path / "target.sqlite3"))) as target:
+    with client(tmp_path / "target-duplicate") as target:
         restored = target.post("/api/v2/backup/restore", json=backup)
         assert restored.status_code == 201, restored.text
         assert len(target.get("/api/v2/commodities").json()["data"]) == 3
         assert len(target.get("/api/v2/journal-entry-drafts").json()["data"]) == 1
         assert target.post("/api/v2/backup/restore", json=backup).status_code == 422
     tampered = {**backup, "sha256": "0" * 64}
-    with TestClient(create_app(connection=connect(tmp_path / "tampered.sqlite3"))) as target:
+    with client(tmp_path / "tampered-duplicate") as target:
         assert target.post("/api/v2/backup/restore", json=tampered).status_code == 422

@@ -1,4 +1,4 @@
-# Finance Core - v2.0.0
+# Finance Core - v3.0.0
 
 Finance Core（FC）是可复用、本地优先的个人财务领域与数据服务。它可以独立展示，也可以被 SFOS 等界面通过版本化 HTTP API 调用。
 
@@ -7,14 +7,16 @@ FC 不依赖 SFOS、Context Sources、OpenAI、Ollama 或任何 LLM。
 ## 能力与边界
 
 ```text
-SFOS adapter / independent FC demo
+SFOS adapter / independent FC app
         │
         ▼
-FastAPI /api/v2
+FastAPI /api/v3/workspaces/{workspaceId}
         │
 deterministic domain + application operations
         │
-SQLite adapter
+Workspace resolver + scoped token
+        │
+Registry SQLite + one ledger SQLite per Vault
 ```
 
 FC 拥有：
@@ -27,7 +29,9 @@ FC 拥有：
 - Dashboard metrics、T-account、financial statements、reconciliation
 - JSON/CSV import/export
 - 10 分钟、单次使用、后续写入会使旧 token 失效的 operation-level undo
-- 本地 SQLite
+- 一个本地 User 可拥有多个 personal/sandbox Workspace
+- 每个 Vault 独立 SQLite、backup、undo 与访问授权
+- 可恢复的 Workspace 隔离删除与 scoped API token
 
 FC 不提供模型分析、投资建议、交易、支付、银行/券商连接或实时行情。
 
@@ -41,13 +45,15 @@ npm.cmd install --offline
 uv sync --project backend --cache-dir .tmp/uv-cache
 ```
 
-启动 API 与独立完整功能 Demo UI：
+先从 `.env.example` 设置一个长随机 `FINANCE_CORE_ADMIN_TOKEN`。可选设置 `FINANCE_CORE_DATA_ROOT`；不得把真实值提交到 Git。
+
+启动 API 与独立完整功能 FC UI：
 
 ```powershell
 npm.cmd run dev
 ```
 
-- Demo：`http://127.0.0.1:5174`（通用、合成数据优先、与 SFOS 完全解耦）
+- FC UI：`http://127.0.0.1:5174`（通用、个人可用、与 SFOS 完全解耦）
 - API：`http://127.0.0.1:8788`
 - OpenAPI：`http://127.0.0.1:8788/docs`
 
@@ -57,7 +63,29 @@ npm.cmd run dev
 npm.cmd run dev:api
 ```
 
-## API v2
+## API v3
+
+健康检查：`GET /api/v3/health`。v3 仅注册 `/api/v3`；旧 `/api/v1`、`/api/v2` 返回 404。
+
+控制层：
+
+- `POST/DELETE /api/v3/session`
+- `GET /api/v3/me`
+- `GET/POST /api/v3/workspaces`
+- `PATCH/DELETE /api/v3/workspaces/{workspaceId}`
+- `GET/POST /api/v3/access-tokens`
+- `POST /api/v3/access-tokens/{tokenId}/revoke`
+- `GET /api/v3/undo/latest?workspaceId=...`、`POST /api/v3/undo`
+
+所有账本资源都位于 `/api/v3/workspaces/{workspaceId}/...`。一个请求只能访问一个 Vault；SFOS 可并发调用多个 Workspace，但必须保持结果分组，FC 不跨 Vault 合并数据。
+
+普通可逆 C/U/D、导入、batch、余额记录和 backup restore 返回 `operationId`、`undoToken`、`expiresAt`、`workspaceId` 与 `operationType`。已过账事实不可删除，post/reversal 只能通过 linked reversal 更正；token revoke 和永久清除不可 undo。
+
+`DELETE /api/v3/workspaces/{workspaceId}` 会 checkpoint 和校验 SQLite 后，把明确文件集移入 30 天可恢复隔离区，不执行递归或自动永久删除。
+
+## 历史 API v2（3.0.0 不再注册）
+
+下面仅保留迁移语义说明；端点在 FC 3.0.0 已停止注册。
 
 健康与兼容性：`GET /api/v2/health`
 
@@ -90,9 +118,9 @@ npm.cmd run dev:api
 
 资产处置必须显式指定 lot allocations。FC 不自动选择 FIFO/LIFO，也不替用户决定税务策略。行情仅来自显式 `PriceQuote`；FC 不连接外部行情服务。
 
-## API v1（Legacy Read-only）
+## 历史 API v1（3.0.0 不再注册）
 
-健康与兼容性：`GET /api/v1/health`。所有 v1 POST/PUT/PATCH/DELETE 返回 `410 LEGACY_API_READ_ONLY`。
+v1 的历史读取语义仅供理解旧数据库；FC 3.0.0 不再提供 HTTP v1 端点。
 
 旧资源仅保留 GET/export，以便人工迁移与审计：
 
@@ -117,26 +145,25 @@ npm.cmd run dev:api
 
 ## 数据迁移
 
-先 dry-run：
+先只读检查源库，再执行 dry-run：
 
 ```powershell
-uv run --project backend python -m finance_core.migration --source '<legacy-sfos-db>'
+uv run --project backend python -m finance_core.maintenance inspect --source '<source-db>'
+uv run --project backend python -m finance_core.maintenance migrate --source '<source-db>' --data-root '<fc-v3-data-root>' --display-name '<vault-name>' --kind personal --dry-run
 ```
 
-真实迁移必须先停止旧写入进程、创建备份并获得 `REAL_DATA_MIGRATION_APPROVED`：
+真实迁移必须先停止源库写入进程、创建备份并获得 `REAL_DATA_MIGRATION_APPROVED`：
 
 ```powershell
-uv run --project backend python -m finance_core.migration --source '<legacy-sfos-db>' --target '<new-fc-db>' --apply
+uv run --project backend python -m finance_core.maintenance migrate --source '<source-db>' --data-root '<fc-v3-data-root>' --display-name '<vault-name>' --kind personal
 ```
 
-该脚本现在把旧表视为只读 legacy archive：
+迁移工具遵守以下边界：
 
-- 以 read-only 模式打开源数据库；
-- 拒绝覆盖已有目标；
-- 输出 v2 ledger audit；所有旧 flat transaction 都要求人工补齐，自动写入 v2 的数量固定为 0；
-- `--apply` 只把旧实体保存到目标库的 v1 read-only tables，不制造 v2 对手方、suspense account、FX 或 lot；
-- 不迁移 `knowledge_notes`、`validation_reports`、`analysis_reports`；
-- 运行 `PRAGMA integrity_check` 与 `PRAGMA foreign_key_check`。
+- 源 DB 始终以 read-only 模式检查，复制到新建 Vault，不移动、不覆盖也不删除源文件；
+- 复制前后运行 `PRAGMA integrity_check`、`PRAGMA foreign_key_check`、表行数和 SHA-256 检查；
+- 每次创建独立 Workspace/Vault，不把多个用户或 Vault 合并进同一 SQLite；
+- 删除源 DB 是另一项显式维护操作：先 checkpoint 与校验，再将明确的 SQLite/WAL/SHM 文件移入 30 天可恢复隔离区，并生成私有 recovery file；不会递归删除或自动永久清除。
 
 ## 测试与构建
 
@@ -145,15 +172,17 @@ npm.cmd test
 npm.cmd run build
 ```
 
-当前测试覆盖 v1 只读兼容、v2 aggregate lifecycle、Decimal/scale、FX、显式 lot、reversal、派生持仓与报表、living world、JSON/CSV draft import、周期 draft、hash backup restore、单次撤销和迁移排除边界。全部使用合成数据与临时 SQLite。
+当前测试覆盖 v3 session、Workspace/Vault 隔离、scoped token、可恢复删除、undo、aggregate lifecycle、Decimal/scale、FX、显式 lot、reversal、派生持仓与报表、living world、JSON/CSV draft import、周期 draft、hash backup restore 和安全迁移。全部使用合成数据与临时 SQLite。
 
-## 独立 Demo 边界
+## 独立 FC UI 边界
 
-- Demo 只调用 `/api/v2` HTTP API，不访问 SQLite、repository 或 backend 内部对象。
-- Demo 不导入 SFOS 类型、组件、CSS、客户端或配置；SFOS 也不依赖 Demo。
+- FC UI 只调用 `/api/v3` HTTP API，不访问 SQLite、repository 或 backend 内部对象。
+- UI 不导入 SFOS 类型、组件、CSS、客户端或配置；SFOS 也不依赖 FC UI。
 - 提供 Commodity/Account/Price、draft editor、split posting、FX、lot、validation、post、reversal、派生报表、生活账户、计划、周期、import/export、backup 和 undo 的交互。
-- 一键示例只允许在空 v2 ledger 装载通用合成数据。
-- Demo 是功能验收台；未来博客 UI 可以重写视觉层，而不改变 FC HTTP contract。
+- 一键示例只允许在空 sandbox Vault 装载通用合成数据，personal Vault 不显示造数入口。
+- 没有 active Vault 时，UI 强制显示创建数据空间窗口。
+
+API 调用、PowerShell 环境变量、认证、启动链路、loading 并发问题与源码局部解构见 [`docs/md/01-fc-v3-api-env-loading.md`](docs/md/01-fc-v3-api-env-loading.md)。
 
 ## Codex 跨仓规则
 
@@ -189,8 +218,8 @@ READ_ONLY
 
 ```text
 IMPLEMENT_APPROVED
-请在 Soren-Finance-App 适配 Finance Core 2.0.0 的 /api/v2 aggregate ledger。
-先读取 Finance Core 的 /api/v2/health 与 OpenAPI 契约，仅通过 HTTP Client 对接，不读取 FC 源码或 SQLite。
+请在 Soren-Finance-App 适配 Finance Core 3.0.0 的 Workspace-scoped /api/v3 aggregate ledger。
+先读取 Finance Core 的 /api/v3/health 与 OpenAPI 契约，仅通过 backend HTTP Client 对接，不读取 FC 源码或 SQLite。Bearer token 只从 SFOS backend 环境变量读取，不得发送到浏览器。
 使用 JournalEntryDraft -> validate -> human confirm -> post；posted 更正只调用 reversal。Decimal string 不得转为 JS number 后回写。保持 Dashboard/Holdings 只读，不在 SFOS 复制确定性财务规则或依赖 FC Demo。
 补充契约测试、typecheck、build 和 README；不要修改 Finance-Core，不要 commit/push。
 完成后输出 Cross-repo impact 区块。
@@ -198,7 +227,7 @@ IMPLEMENT_APPROVED
 
 ## 隐私与 Git
 
-- `.local-data`、SQLite/WAL/SHM、导入导出、环境文件、日志、私有媒体与备份均被忽略。
+- `.local-data`、SQLite/WAL/SHM、隔离区、导入导出、环境文件、日志、私有媒体与备份均被忽略。
 - 不得提交或输出真实财务记录、数据库路径、请求体、SQL 参数、密钥或凭证。
 - FC 是唯一可写其财务数据库的进程。
 - 不自动 commit 或 push；FC 与 SFOS 分别获得确认。

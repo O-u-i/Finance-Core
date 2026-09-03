@@ -7,7 +7,7 @@ import sqlite3
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException, Request, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 from pydantic import ValidationError
 
 from finance_core.ledger_repository import LedgerRepository, dump
@@ -26,7 +26,8 @@ from finance_core.models_v2 import (
 
 
 def repo(request: Request) -> LedgerRepository:
-    return request.app.state.ledger_repository
+    scoped = getattr(request.state, "ledger_repository", None)
+    return scoped or request.app.state.ledger_repository
 
 
 def translate(error: Exception) -> HTTPException:
@@ -39,19 +40,27 @@ def translate(error: Exception) -> HTTPException:
     return HTTPException(500, detail="Finance Core could not complete the operation.")
 
 
-def create_v2_router() -> APIRouter:
-    router = APIRouter(prefix="/api/v2")
+def create_v2_router(
+    *,
+    prefix: str = "/api/v2",
+    dependencies: list[Any] | None = None,
+    service_version: str = "2.0.0",
+    api_version: str = "2.0.0",
+) -> APIRouter:
+    router = APIRouter(prefix=prefix, dependencies=dependencies or [])
 
     @router.get("/health")
     def health(request: Request) -> dict[str, Any]:
-        request.app.state.database.execute("SELECT 1").fetchone()
+        database = getattr(request.state, "database", None) or request.app.state.database
+        database.execute("SELECT 1").fetchone()
         return {
             "status": "ok",
             "service": "finance-core",
-            "serviceVersion": "2.0.0",
-            "apiVersion": "2.0.0",
-            "schemaVersion": 2,
-            "supportedApiVersions": ["1.0.0-read-only", "2.0.0"],
+            "serviceVersion": service_version,
+            "apiVersion": api_version,
+            "ledgerSchemaVersion": 2,
+            "registrySchemaVersion": 1 if api_version.startswith("3.") else None,
+            "supportedApiVersions": [api_version],
             "capabilities": [
                 "decimal-strings", "commodities", "typed-accounts", "price-quotes",
                 "journal-drafts", "aggregate-validation", "atomic-post", "linked-reversal",
@@ -59,7 +68,7 @@ def create_v2_router() -> APIRouter:
                 "t-accounts", "financial-statements", "cash-flow", "reconciliation",
                 "recurring-drafts", "draft-import", "living-world", "monthly-plans",
                 "json-export", "csv-import-export", "hashed-backup-restore",
-                "single-step-undo", "atomic-mutable-batch",
+                "single-step-undo", "atomic-mutable-batch", "workspace-scoped",
             ],
         }
 
@@ -424,6 +433,9 @@ def create_v2_router() -> APIRouter:
 
     @router.post("/demo/load-synthetic", status_code=201)
     def load_synthetic(request: Request) -> dict[str, Any]:
+        workspace = getattr(request.state, "workspace", None)
+        if workspace is not None and workspace["kind"] != "sandbox":
+            raise HTTPException(403, detail="Synthetic data can only be loaded into a sandbox workspace.")
         ledger = repo(request)
         if ledger.list_commodities() or ledger.list_accounts():
             raise HTTPException(409, detail="Synthetic demo data can only be loaded into an empty v2 ledger.")
