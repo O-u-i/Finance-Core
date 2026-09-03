@@ -1,4 +1,4 @@
-# Finance Core - v3.1.0
+# Finance Core - v3.1.1
 
 Finance Core（FC）是可复用、本地优先的个人财务领域与数据服务。它可以独立展示，也可以被 SFOS 等界面通过版本化 HTTP API 调用。
 
@@ -79,7 +79,7 @@ npm.cmd run dev:api
 
 所有账本资源都位于 `/api/v3/workspaces/{workspaceId}/...`。一个请求只能访问一个 Vault；SFOS 可并发调用多个 Workspace，但必须保持结果分组，FC 不跨 Vault 合并数据。
 
-FC 3.1.0 为全部 Workspace ledger operation 发布命名 OpenAPI response schema、Bearer access token / `fc_session` 两种认证边界、`ledger:read` / `ledger:write` operation scope，以及标准业务错误 response。新增通用读取 `GET .../holdings/{holdingId}` 和可逆删除 `DELETE .../living-accounts/{accountId}`；后者与该账户的 snapshots 在一个 transaction 内删除，并由一次 undo 一起恢复。
+FC 3.1.1 修正 Journal consumer endpoints 与 commodities、accounts、price-quotes、T-account、dashboard、statements、cash-flow、reconciliation、living、monthly plan、recurring rule、world 和 undo read models 的成功响应契约。`DraftValidationResponse` 现在准确声明 `valid`、`issues`、`preview` 与 `workspaceId`；这些 endpoint 不再用 `LedgerResponse.data` 的任意结构掩盖实际响应。认证、scope、错误、Decimal string、显式 lot allocation、post 与 linked reversal 语义保持兼容。
 
 普通可逆 C/U/D、导入、batch、余额记录和 backup restore 返回 `operationId`、`undoToken`、`expiresAt`、`workspaceId` 与 `operationType`。已过账事实不可删除，post/reversal 只能通过 linked reversal 更正；token revoke 和永久清除不可 undo。
 
@@ -143,7 +143,7 @@ v1 的历史读取语义仅供理解旧数据库；FC 3.0.0 不再提供 HTTP v1
 - `GET /api/v1/export`
 - `GET /api/v1/export/{transactions|holdings}.csv`
 
-兼容规则：Patch 只做兼容修复；Minor 可增加端点或可选字段；删除、重命名、改变 requiredness 或语义必须升级 Major。3.1.0 相对已发布 3.0.0 为 additive contract；既有 3.0 consumer 可继续使用原 endpoint 与字段。FC 2 客户端范围为 `>=2.0.0 <3.0.0`。
+兼容规则：Patch 只做兼容修复；Minor 可增加端点或可选字段；删除、重命名、改变 requiredness 或语义必须升级 Major。3.1.1 是 3.1.0 的 OpenAPI contract correction，不改变运行时业务语义；SFOS consumer 的兼容范围为 `>=3.1.1 <4.0.0`。FC 2 客户端范围为 `>=2.0.0 <3.0.0`。
 
 ## 数据迁移
 
@@ -176,7 +176,7 @@ npm.cmd run build
 
 当前测试覆盖 v3 session、Workspace/Vault 隔离、scoped token、可恢复删除、undo、aggregate lifecycle、Decimal/scale、FX、显式 lot、reversal、派生持仓与报表、living world、JSON/CSV draft import、周期 draft、hash backup restore 和安全迁移。全部使用合成数据与临时 SQLite。
 
-3.1.0 release artifact 位于 `docs/release/`：规范 OpenAPI JSON 与 manifest 一起发布，manifest 记录 OpenAPI 文件的 SHA-256。`npm.cmd run check:release` 会重新生成到内存并校验 hash，避免文档与运行时 contract 漂移。
+3.1.1 release artifact 位于 `docs/release/`：规范 OpenAPI JSON 与 manifest 一起发布，manifest 记录 OpenAPI 文件的 SHA-256。`npm.cmd run check:release` 会重新生成到内存并校验 hash，避免文档与运行时 contract 漂移。
 
 ## 独立 FC UI 边界
 
@@ -222,10 +222,10 @@ READ_ONLY
 
 ```text
 IMPLEMENT_APPROVED
-请在 Soren-Finance-App 适配 Finance Core 3.1.0 的 additive Workspace-scoped `/api/v3` contract。
-先通过发布的 `/api/v3/health`、OpenAPI artifact 及其 SHA-256 校验版本与契约；仅由 SFOS backend HTTP Client 调用 FC，不读取 FC 源码、Registry、Vault 或 SQLite。Bearer access token 只从 SFOS backend 环境变量读取，不得发送到浏览器、日志或错误响应；`fc_session` 只属于 FC 本机管理 UI，不应由 SFOS 代管。
-保持现有 JournalEntryDraft -> validate -> human confirm -> post 流程，posted 更正只调用 linked reversal。Decimal string 不得转为 JS number 后回写，不改变 lot allocation 或 Workspace 隔离。按 OpenAPI 的 `x-fc-required-scope` 使用 `ledger:read` / `ledger:write`，并处理 AUTH_REQUIRED、TOKEN_SCOPE_DENIED、WORKSPACE_NOT_FOUND、RESOURCE_NOT_FOUND、WORKSPACE_ARCHIVED、UNDO_CONFLICT、UNDO_EXPIRED、INVALID_REQUEST。
-新增适配 `GET /api/v3/workspaces/{workspaceId}/holdings/{holdingId}`，复用 Holding item schema 并保持只读；新增适配 `DELETE /api/v3/workspaces/{workspaceId}/living-accounts/{accountId}`，消费其 operationId、undoToken、expiresAt、workspaceId、operationType，并通过 `POST /api/v3/undo` 验证 account 与 snapshots 同时恢复。补充 synthetic contract tests、跨 Workspace 隐藏、scope、archived/quarantined、typecheck、build 和 README；不要修改 Finance-Core，不要读取真实数据，不要 commit/push。
+请在 Soren-Finance-App 适配 Finance Core 3.1.1 的 contract-corrected Workspace-scoped `/api/v3` contract，兼容范围固定为 `>=3.1.1 <4.0.0`。
+先校验 `/api/v3/health`、`docs/release/finance-core-v3.1.1-openapi.json` 与 manifest SHA-256；本次只修正 consumer contract，不改变业务语义。将 Journal draft list/create/get/update/delete/validate/post、Journal entry list/get/reverse，以及 commodities、accounts、price-quotes、t-accounts、dashboard、financial-statements、cash-flow、reconciliation、living-accounts、living-snapshots、monthly-plans、recurring-entry-rules、world、undo/latest 和 undo 的客户端类型改为 3.1.1 发布 artifact 中对应的命名 response schema。尤其 validate 必须消费 `DraftValidationResponse { workspaceId, valid, issues, preview }`，其中 `issues` 是完整 `ValidationIssue[]`，`preview` 是 `JournalEntry | null`。
+保持 `JournalEntryDraft -> validate -> human confirm -> post`，posted entry 只通过 linked reversal 更正；所有 amount/units/price/rate/valuation/FX 继续作为 Decimal string，不转为 JS number 后回写，disposal lot 必须由人明确选择，不能由 SFOS 自动选择。按 `x-fc-required-scope` 使用 `ledger:read` / `ledger:write`，处理 `AUTH_REQUIRED`、`TOKEN_SCOPE_DENIED`、`WORKSPACE_NOT_FOUND`、`RESOURCE_NOT_FOUND`、`WORKSPACE_ARCHIVED`、`UNDO_CONFLICT`、`UNDO_EXPIRED` 与 `INVALID_REQUEST`。
+仅由 SFOS backend HTTP client 调用 FC。Bearer token 只从 backend 环境变量读取，不进入浏览器、日志或错误响应；`fc_session` 只属于 FC 本机管理 UI。不得读取 FC Registry、Vault SQLite、数据库路径或真实财务记录。补充 synthetic response-schema、Decimal 精度、scope denial、archived write rejection、Workspace isolation、post/reversal、typecheck、build 与 README 验证；不要修改 Finance-Core，不要 commit/push。完成后输出 Cross-repo impact 区块。
 完成后输出 Cross-repo impact 区块。
 ```
 

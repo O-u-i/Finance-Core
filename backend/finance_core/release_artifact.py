@@ -26,7 +26,7 @@ def expected_artifacts() -> tuple[bytes, bytes, str]:
     openapi_bytes = canonical_json(schema)
     openapi_sha256 = hashlib.sha256(openapi_bytes).hexdigest()
     manifest = {
-        "apiVersion": "3.1.0",
+        "apiVersion": "3.1.1",
         "buildCommit": public_commit(os.environ.get("FINANCE_CORE_BUILD_COMMIT")),
         "openapiArtifact": OPENAPI_PATH.name,
         "openapiSha256": openapi_sha256,
