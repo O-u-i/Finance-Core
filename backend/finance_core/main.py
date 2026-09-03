@@ -36,7 +36,7 @@ def json_model(model: Any) -> dict[str, Any]:
     return model.model_dump(by_alias=True, exclude_none=True)
 
 
-def create_app(
+def create_legacy_app(
     *,
     connection: sqlite3.Connection | None = None,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
@@ -335,4 +335,11 @@ def create_app(
     return app
 
 
-app = create_app(database_path=os.environ.get("FINANCE_CORE_DATABASE_PATH", DEFAULT_DATABASE_PATH))
+from finance_core.app_v3 import create_app
+
+# The legacy factory remains private for data archaeology only. The exported
+# application factory and ASGI app are v3-only.
+app = create_app(
+    data_root=os.environ.get("FINANCE_CORE_DATA_ROOT", str(DEFAULT_DATABASE_PATH.parent / "v3")),
+    admin_token=os.environ.get("FINANCE_CORE_ADMIN_TOKEN"),
+)

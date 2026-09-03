@@ -25,6 +25,8 @@ exports/
 *.xls
 *.xlsx
 *.pdf
+!docs/pdf/
+!docs/pdf/finance-core-v*-horizon.pdf
 *.doc
 *.docx
 *.ofx

@@ -39,9 +39,11 @@ def dump(model: Any) -> dict[str, Any]:
 class LedgerRepository:
     MUTABLE_TABLES = [
         "commodities_v2", "accounts_v2", "price_quotes_v2", "journal_drafts_v2",
+        "journal_entries_v2", "postings_v2", "lots_v2", "lot_movements_v2",
         "recurring_entry_rules_v2", "living_accounts_v2", "living_snapshots_v2", "monthly_plans_v2",
     ]
     MUTABLE_DELETE_ORDER = [
+        "lot_movements_v2", "lots_v2", "postings_v2", "journal_entries_v2",
         "price_quotes_v2", "journal_drafts_v2", "recurring_entry_rules_v2",
         "living_snapshots_v2", "monthly_plans_v2", "living_accounts_v2", "accounts_v2", "commodities_v2",
     ]
@@ -804,6 +806,7 @@ class LedgerRepository:
         if any(self.connection.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() for table in insert_order):
             raise ValueError("Backup restore requires an empty v2 ledger.")
         counts: dict[str, int] = {}
+        before = self._mutable_snapshot()
         with transaction(self.connection):
             for table in insert_order:
                 allowed_columns = [row[1] for row in self.connection.execute(f"PRAGMA table_info({table})")]
@@ -821,7 +824,7 @@ class LedgerRepository:
                 counts[table] = len(rows)
             if self.connection.execute("PRAGMA foreign_key_check").fetchall():
                 raise ValueError("Restored backup failed foreign-key validation.")
-            self._invalidate_undo()
+            self._save_undo(before)
         return counts
 
     def latest_undo(self) -> dict[str, str] | None:

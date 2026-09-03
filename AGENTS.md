@@ -12,10 +12,12 @@ Explain work in beginner-friendly Chinese. English identifiers and code comments
 
 - Domain code does not import FastAPI, SQLite, React, HTTP clients, repositories, or SFOS code.
 - Application operations depend on domain models and repository ports; FastAPI, SQLite, CSV, and demo UI are adapters.
-- Public APIs are rooted at `/api/v1`.
+- FC 3.0.0 public APIs are rooted at `/api/v3`; every finance endpoint is explicitly scoped by `/workspaces/{workspaceId}`.
 - Patch releases are compatible fixes. Minor releases may add endpoints or optional fields. Removing, renaming, changing requiredness, or changing semantics requires a new major version.
 - FC is the only runtime allowed to write its finance SQLite.
-- Demo UI is generic and uses only synthetic data. Do not copy SFOS branding, Context, Position Review, or LLM features.
+- FC UI remains generic and may display the selected personal Vault. Synthetic loading is allowed only in an empty sandbox Vault. Do not copy SFOS branding, Context, Position Review, or LLM features.
+- A User, Workspace/Vault, and finance Account are different concepts. Each Vault owns one complete finance SQLite; never implement a process-global current database.
+- Every major release must add a versioned, rendered, visually verified project Horizon PDF under `docs/pdf/`. Horizon candidates are not implemented commitments.
 
 ## Cross-repository protocol
 
@@ -63,6 +65,8 @@ Prompt for the other repo:
 
 When deletion is approved, delete only one explicit file path at a time. If multiple files or a directory must be removed, stop and ask the user to do it manually.
 
+Product-level Vault deletion is a reversible quarantine operation: checkpoint and validate first, move each explicit SQLite/WAL/SHM file separately, and never auto-purge a directory. Permanent purge remains an explicit one-file operation with no undo.
+
 - Never commit real finance data, journals, holdings, bank/broker records, screenshots, Office/PDF/CSV exports, SQLite/WAL/SHM/backups, or personal planning files.
 - Never expose keys, passwords, tokens, credentials, database paths, SQL parameters, request bodies, or private rows.
 - `.env.example` is allowed; `.env` and `.env.*` remain ignored.
@@ -71,7 +75,7 @@ When deletion is approved, delete only one explicit file path at a time. If mult
 
 ## Development workflow
 
-1. Run relevant architecture checks, backend tests, demo build, and contract tests.
+1. Run relevant architecture checks, backend tests, FC UI build, contract tests, version sync, and Horizon PDF render/text verification.
 2. Verify API contract changes and SemVer classification.
 3. Update README and compatibility notes.
 4. Report the cross-repo impact block and exact other-repo prompt.
