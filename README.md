@@ -1,13 +1,13 @@
 # Finance Core - v3.1.1
 
-Finance Core（FC）是可复用、本地优先的个人财务领域与数据服务。它可以独立展示，也可以被 SFOS 等界面通过版本化 HTTP API 调用。
+Finance Core（FC）是可复用、本地优先的个人财务领域与数据服务。它可通过自己的中英文独立 UI 使用；FRAG-harness 也可安装单独发布的可选只读插件，通过 FC 的版本化 HTTP API 获取数据。
 
-FC 不依赖 SFOS、Context Sources、OpenAI、Ollama 或任何 LLM。
+FC 运行时不依赖 FRAG、SFOS、Context Sources、OpenAI、Ollama 或任何 LLM。
 
 ## 能力与边界
 
 ```text
-SFOS adapter / independent FC app
+optional FRAG plugin / standalone FC UI
         │
         ▼
 FastAPI /api/v3/workspaces/{workspaceId}
@@ -53,7 +53,7 @@ uv sync --project backend --cache-dir .tmp/uv-cache
 npm.cmd run dev
 ```
 
-- FC UI：`http://127.0.0.1:5174`（通用、个人可用、与 SFOS 完全解耦）
+- FC UI：`http://127.0.0.1:5174`（通用、个人可用、独立运行）
 - API：`http://127.0.0.1:8788`
 - OpenAPI：`http://127.0.0.1:8788/docs`
 
@@ -77,7 +77,7 @@ npm.cmd run dev:api
 - `POST /api/v3/access-tokens/{tokenId}/revoke`
 - `GET /api/v3/undo/latest?workspaceId=...`、`POST /api/v3/undo`
 
-所有账本资源都位于 `/api/v3/workspaces/{workspaceId}/...`。一个请求只能访问一个 Vault；SFOS 可并发调用多个 Workspace，但必须保持结果分组，FC 不跨 Vault 合并数据。
+所有账本资源都位于 `/api/v3/workspaces/{workspaceId}/...`。一个请求只能访问一个 Vault；外部后端消费者必须保持 Workspace 分组，FC 不跨 Vault 合并数据。
 
 FC 3.1.1 修正 Journal consumer endpoints 与 commodities、accounts、price-quotes、T-account、dashboard、statements、cash-flow、reconciliation、living、monthly plan、recurring rule、world 和 undo read models 的成功响应契约。`DraftValidationResponse` 现在准确声明 `valid`、`issues`、`preview` 与 `workspaceId`；这些 endpoint 不再用 `LedgerResponse.data` 的任意结构掩盖实际响应。认证、scope、错误、Decimal string、显式 lot allocation、post 与 linked reversal 语义保持兼容。
 
@@ -143,7 +143,7 @@ v1 的历史读取语义仅供理解旧数据库；FC 3.0.0 不再提供 HTTP v1
 - `GET /api/v1/export`
 - `GET /api/v1/export/{transactions|holdings}.csv`
 
-兼容规则：Patch 只做兼容修复；Minor 可增加端点或可选字段；删除、重命名、改变 requiredness 或语义必须升级 Major。3.1.1 是 3.1.0 的 OpenAPI contract correction，不改变运行时业务语义；SFOS consumer 的兼容范围为 `>=3.1.1 <4.0.0`。FC 2 客户端范围为 `>=2.0.0 <3.0.0`。
+兼容规则：Patch 只做兼容修复；Minor 可增加端点或可选字段；删除、重命名、改变 requiredness 或语义必须升级 Major。3.1.1 是 3.1.0 的 OpenAPI contract correction，不改变运行时业务语义。可选 FRAG 插件 v1.0.0 要求 FRAG plugin protocol 1、FRAG host `>=1.0.0` 和 FC API 3.1.1。FC 2 客户端范围为 `>=2.0.0 <3.0.0`。
 
 ## 数据迁移
 
@@ -178,17 +178,26 @@ npm.cmd run build
 
 3.1.1 release artifact 位于 `docs/release/`：规范 OpenAPI JSON 与 manifest 一起发布，manifest 记录 OpenAPI 文件的 SHA-256。`npm.cmd run check:release` 会重新生成到内存并校验 hash，避免文档与运行时 contract 漂移。
 
+可选 FRAG 插件归档与安装契约见 [`docs/md/02-frag-finance-core-plugin.md`](docs/md/02-frag-finance-core-plugin.md)。归档是供 FRAG 安装的 ZIP 文件，和 Codex/ChatGPT 对话归档无关；根目录只含 `manifest.json`、`adapter.py`、`ui.js`。FRAG 插件只读、英文界面；Journal 修改由 FC 自身 UI 完成。
+
 ## 独立 FC UI 边界
 
 - FC UI 只调用 `/api/v3` HTTP API，不访问 SQLite、repository 或 backend 内部对象。
-- UI 不导入 SFOS 类型、组件、CSS、客户端或配置；SFOS 也不依赖 FC UI。
+- UI 不导入 FRAG 或 SFOS 类型、组件、CSS、客户端或配置；FRAG 插件也不依赖 FC UI。
+- 独立 UI 提供中文/English 切换（仅保存语言偏好），使用本地打包的 Public Sans 正体/SemiBold 与 Libre Bodoni 正体/斜体；浅色背景与主按钮使用 `#EFEEE7`。切换语言不改变表单值或 API 枚举值。
 - 提供 Commodity/Account/Price、draft editor、split posting、FX、lot、validation、post、reversal、派生报表、生活账户、计划、周期、import/export、backup 和 undo 的交互。
 - 一键示例只允许在空 sandbox Vault 装载通用合成数据，personal Vault 不显示造数入口。
 - 没有 active Vault 时，UI 强制显示创建数据空间窗口。
 
 API 调用、PowerShell 环境变量、认证、启动链路、loading 并发问题与源码局部解构见 [`docs/md/01-fc-v3-api-env-loading.md`](docs/md/01-fc-v3-api-env-loading.md)。
 
-## Codex 跨仓规则
+## 当前 FRAG 跨仓规则
+
+FRAG-harness 是可选消费者。FC 保持独立运行，只有 FC 可写财务 SQLite。FRAG 插件通过 FC 已发布的 `/api/v3` 读取限定 Workspace 的 Dashboard 与人工选择的最多十条 Journal 记录；凭证只在后端。FRAG Journal 操作打开 FC 自身 UI。按 [`docs/md/02-frag-finance-core-plugin.md`](docs/md/02-frag-finance-core-plugin.md) 构建和核对归档，再由 FRAG 仓库独立安装与测试；不要在 FC 任务中修改 FRAG。
+
+## 历史 SFOS 协作记录（不作为当前 FRAG 指引）
+
+以下保留旧 SFOS 消费关系的原始任务记录，仅用于追溯，当前协作以本仓库 `AGENTS.md` 与上方 FRAG 插件文档为准。
 
 每次修改必须输出统一影响区块。所有新需求只从一个仓库进入分诊：不知道归属时，只在一个仓库先用 `READ_ONLY` 询问，不要同时把同一需求发送给 SFOS 与 FC 两个 Codex 任务，也不要让它们并行、独立设计同一需求。面向产品或仍无法判断归属的需求默认从 SFOS 开始；明确属于通用财务领域的需求可以从 FC 开始。
 

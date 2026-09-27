@@ -1,0 +1,11 @@
+{
+  "id": "finance-core",
+  "protocolVersion": 1,
+  "version": "1.0.0",
+  "minHostVersion": "1.0.0",
+  "fcApiVersion": "3.1.1",
+  "files": {
+    "adapter.py": "9903835635a597dd52039166efe667643f6c5a21c6b6e481128465fcea38c681",
+    "ui.js": "36bcf6d56e69014543a18a578b6fe8ba10f3cf4043e8cc7555af09655654c166"
+  }
+}
