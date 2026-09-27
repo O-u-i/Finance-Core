@@ -1,14 +1,14 @@
 @font-face { font-family: 'Public Sans'; src: url('../fonts/PublicSans-Variable.ttf') format('truetype'); font-style: normal; font-weight: 400 600; font-display: swap; }
 @font-face { font-family: 'Libre Bodoni'; src: url('../fonts/LibreBodoni-Variable.ttf') format('truetype'); font-style: normal; font-weight: 400 700; font-display: swap; }
 @font-face { font-family: 'Libre Bodoni'; src: url('../fonts/LibreBodoni-Italic-Variable.ttf') format('truetype'); font-style: italic; font-weight: 400 700; font-display: swap; }
-:root { font-family: 'Public Sans', 'Microsoft YaHei', sans-serif; color: #252722; background: #EFEEE7; font-synthesis: none; }
+:root { font-family: 'Public Sans', Arial, sans-serif; color: #252722; background: #EFEEE7; font-synthesis: none; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: #EFEEE7; }
 #app { width: min(1120px, calc(100% - 40px)); margin: 0 auto; padding: 44px 0; }
 header, .intro { display: flex; align-items: center; justify-content: space-between; gap: 32px; }
 header { padding-bottom: 30px; border-bottom: 1px solid #d7d7d0; }
-h1 { margin: 3px 0 0; font-family: 'Libre Bodoni', 'Songti SC', serif; font-size: clamp(2.1rem, 5vw, 4.4rem); font-weight: 500; letter-spacing: -0.04em; }
-h2 { font-family: 'Libre Bodoni', 'Songti SC', serif; font-size: 1.55rem; font-weight: 500; }
+h1 { margin: 3px 0 0; font-family: 'Libre Bodoni', Georgia, serif; font-size: clamp(2.1rem, 5vw, 4.4rem); font-weight: 500; letter-spacing: -0.04em; }
+h2 { font-family: 'Libre Bodoni', Georgia, serif; font-size: 1.55rem; font-weight: 500; }
 p { color: #5c625b; line-height: 1.65; }
 .eyebrow { margin: 0; color: #3b423b; font-size: .72rem; font-weight: 600; letter-spacing: .16em; }
 .badge { padding: 9px 13px; border: 1px solid #a8aaa2; border-radius: 999px; color: #252722; font-size: .82rem; white-space: nowrap; }
@@ -72,20 +72,14 @@ th { color: #5c625b; }
 .postings tr { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; margin-bottom: 10px; padding: 12px; border: 1px solid #d7d7d0; border-radius: 10px; background: #ffffff; }
 .postings td { display: block; min-width: 0; padding: 0; border: 0; }
 .postings td::before { display: block; margin-bottom: 4px; color: #5c625b; font-size: .72rem; }
-.postings td:nth-child(1)::before { content: '账户'; }
-.postings td:nth-child(2)::before { content: '方向'; }
+.postings td:nth-child(1)::before { content: 'Account'; }
+.postings td:nth-child(2)::before { content: 'Side'; }
 .postings td:nth-child(3)::before { content: 'Units'; }
-.postings td:nth-child(4)::before { content: '商品'; }
-.postings td:nth-child(5)::before { content: '估值率'; }
-.postings td:nth-child(6)::before { content: '类型'; }
-.postings td:nth-child(7)::before { content: '现金流'; }
+.postings td:nth-child(4)::before { content: 'Commodity'; }
+.postings td:nth-child(5)::before { content: 'Valuation rate'; }
+.postings td:nth-child(6)::before { content: 'Type'; }
+.postings td:nth-child(7)::before { content: 'Cash flow'; }
 .postings td:nth-child(8)::before { content: 'Lot / Allocation'; }
-[lang="en"] .postings td:nth-child(1)::before { content: 'Account'; }
-[lang="en"] .postings td:nth-child(2)::before { content: 'Side'; }
-[lang="en"] .postings td:nth-child(4)::before { content: 'Commodity'; }
-[lang="en"] .postings td:nth-child(5)::before { content: 'Valuation rate'; }
-[lang="en"] .postings td:nth-child(6)::before { content: 'Type'; }
-[lang="en"] .postings td:nth-child(7)::before { content: 'Cash flow'; }
 .postings td:nth-child(8) { grid-column: span 3; }
 .postings td:nth-child(8) input { margin-top: 4px; }
 .workflow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
@@ -111,13 +105,9 @@ th { color: #5c625b; }
 pre { max-height: 360px; overflow: auto; white-space: pre-wrap; }
 @media (max-width: 900px) { .columns, .metrics, .form-grid, .inline-form { grid-template-columns: 1fr 1fr; } .hero, .section-title, .app-header { align-items: flex-start; flex-direction: column; } .workspace-tools { justify-content: flex-start; } .postings tr { grid-template-columns: repeat(2, minmax(0, 1fr)); } .postings td:nth-child(8) { grid-column: span 2; } }
 @media (max-width: 600px) { #app { width: min(100% - 18px, 1120px); } .columns, .metrics, .form-grid, .inline-form, .compact-form, .workflow { grid-template-columns: 1fr; } .panel { padding: 14px; } .postings tr { grid-template-columns: 1fr; } .postings td:nth-child(8) { grid-column: span 1; } .tab:last-child { margin-left: 0; } }
-h3, .metrics strong, .card strong, dd { font-family: 'Libre Bodoni', 'Songti SC', serif; font-weight: 500; }
+h3, .metrics strong, .card strong, dd { font-family: 'Libre Bodoni', Georgia, serif; font-weight: 500; }
 .app-header h1, .auth-card h1, .wizard h1 { font-style: italic; }
-button, .button, input, select, textarea { font-family: 'Public Sans', 'Microsoft YaHei', sans-serif; font-weight: 400; }
+button, .button, input, select, textarea { font-family: 'Public Sans', Arial, sans-serif; font-weight: 400; }
 button.primary, .tab.active, th, label { font-weight: 600; }
 button:hover:not(:disabled), .button:hover { border-color: #252722; }
 button:focus-visible, .button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #252722; outline-offset: 2px; }
-.language-switch { position: fixed; top: 12px; right: 16px; z-index: 30; display: flex; gap: 4px; padding: 4px; border: 1px solid #a8aaa2; border-radius: 10px; background: #fafaf7; box-shadow: 0 4px 20px #2527221a; }
-.language-switch button { min-width: 44px; padding: 5px 9px; background: transparent; border: 1px solid transparent; }
-.language-switch button[aria-pressed="true"] { background: #EFEEE7; border-color: #858980; font-weight: 600; }
-#app { padding-top: 64px; }
