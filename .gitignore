@@ -6,7 +6,16 @@ dist/
 .pytest_cache/
 backend/.pytest_cache/
 backend/**/__pycache__/
+plugins/**/__pycache__/
+tools/__pycache__/
 *.tsbuildinfo
+
+# Local agent instructions and design tooling are outside the application.
+AGENTS.md
+.agents/
+docs/codex-skills/
+scripts/check-skill-lock.mjs
+docs/history-transition.md
 
 # Local data, imports, exports, and secrets
 .local-data/
@@ -46,6 +55,7 @@ exports/
 *.gif
 *.webp
 *.zip
+!docs/release/finance-core-frag-plugin-v1.0.0.zip
 *.7z
 private/
 personal/

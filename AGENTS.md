@@ -2,20 +2,20 @@
 
 ## Project identity
 
-Finance Core (FC) is a reusable, local-first finance domain and data service used by SFOS and its own generic demo UI. It must remain independently understandable and runnable.
+Finance Core (FC) is a reusable, local-first finance domain and data service with its own standalone UI. FRAG-harness may consume it through an optional, separately released plugin. FC must remain independently understandable and runnable.
 
-FC owns finance entities, deterministic calculations, application operations, versioned HTTP contracts, SQLite, CSV, and operation-level undo. FC must not depend on SFOS, Context/Inference LLMs, OpenAI, Ollama, or private research files.
+FC owns finance entities, deterministic calculations, application operations, versioned HTTP contracts, SQLite, CSV, and operation-level undo. FC runtime modules must not import FRAG, SFOS, Context/Inference LLMs, OpenAI, Ollama, or private research files.
 
 Explain work in beginner-friendly Chinese. English identifiers and code comments are appropriate.
 
 ## Architecture boundary
 
-- Domain code does not import FastAPI, SQLite, React, HTTP clients, repositories, or SFOS code.
+- Domain code does not import FastAPI, SQLite, React, HTTP clients, repositories, FRAG, or SFOS code.
 - Application operations depend on domain models and repository ports; FastAPI, SQLite, CSV, and demo UI are adapters.
 - FC 3.0.0 public APIs are rooted at `/api/v3`; every finance endpoint is explicitly scoped by `/workspaces/{workspaceId}`.
 - Patch releases are compatible fixes. Minor releases may add endpoints or optional fields. Removing, renaming, changing requiredness, or changing semantics requires a new major version.
 - FC is the only runtime allowed to write its finance SQLite.
-- FC UI remains generic and may display the selected personal Vault. Synthetic loading is allowed only in an empty sandbox Vault. Do not copy SFOS branding, Context, Position Review, or LLM features.
+- FC UI remains generic and may display the selected personal Vault. Its Chinese/English switch belongs only to the standalone UI; the FRAG plugin bundle remains English. Synthetic loading is allowed only in an empty sandbox Vault.
 - A User, Workspace/Vault, and finance Account are different concepts. Each Vault owns one complete finance SQLite; never implement a process-global current database.
 - Every major release must add a versioned, rendered, visually verified project Horizon PDF under `docs/pdf/`. Horizon candidates are not implemented commitments.
 
@@ -24,7 +24,7 @@ Explain work in beginner-friendly Chinese. English identifiers and code comments
 Before and after every change, output:
 
 ```text
-Cross-repo impact: NONE | SFOS_SYNC_REQUIRED | FC_SYNC_REQUIRED | BOTH_REQUIRED
+Cross-repo impact: NONE | FRAG_SYNC_REQUIRED | FC_SYNC_REQUIRED | BOTH_REQUIRED
 Contract change: NONE | ADDITIVE | BREAKING
 Other repo status: NOT_TOUCHED | UPDATED | BLOCKED_PENDING_RELEASE
 Required compatible version:
@@ -32,20 +32,20 @@ Reason:
 Prompt for the other repo:
 ```
 
-- Contract changes consumed by SFOS require an exact SFOS prompt with version, endpoint, fields, tests, and privacy constraints.
-- Do not edit SFOS unless it is explicitly writable in the current task.
-- Do not add SFOS-only behavior to FC merely to satisfy one screen; define a generic finance capability.
-- Release order is FC contract and synthetic tests first, then SFOS client/UI.
+- FRAG integration requires an exact prompt with protocol and FC API versions, routes, fields, tests, and privacy constraints.
+- Do not edit FRAG unless it is explicitly writable in the current task.
+- Do not add FRAG-specific behavior to FC runtime merely to satisfy one screen; keep the optional adapter in its plugin artifact.
+- Release order is FC contract and synthetic tests first, then the optional plugin artifact, then FRAG installation.
 
 ### Requirement triage
 
 - When requirement ownership is unclear, perform `READ_ONLY` triage before implementation. Do not edit either repository until the requirement is classified.
-- Use a single entry point: do not ask the SFOS and FC Codex tasks to independently or concurrently design the same requirement. Product-facing or otherwise uncertain requirements start in SFOS; clearly reusable finance-domain requirements may start in FC.
+- Use a single entry point: do not ask FRAG and FC tasks to independently or concurrently design the same requirement. Host presentation starts in FRAG; reusable finance capabilities start in FC.
 - Classify every requirement as exactly one of:
-  - `SFOS_ONLY`: UI, navigation, Context Sources, Context LLM, Inference LLM, or presentation-only changes.
-  - `FC_ONLY`: finance entities, deterministic calculations, persistence, CSV, undo, or generic finance APIs.
-  - `BOTH`: SFOS requires a new or changed FC contract.
-- For `BOTH`, use **FC first**: implement and test FC, determine the compatible API version, and only then adapt SFOS.
+  - `FRAG_ONLY`: host UI, navigation, or presentation-only changes.
+  - `FC_ONLY`: standalone FC UI, finance entities, deterministic calculations, persistence, CSV, undo, or generic finance APIs.
+  - `BOTH`: FRAG needs a new or changed FC contract or plugin artifact.
+- For `BOTH`, use **FC first**: implement and test FC, determine the compatible API and plugin protocol versions, and only then integrate in FRAG.
 - Cross-repository work must produce a complete prompt that can be sent directly to the other repository. The prompt must include scope, responsibility boundaries, expected endpoints and version, required tests, privacy constraints, and `do not commit/push`.
 - Do not create a local substitute implementation merely because the other repository has not implemented the required capability yet.
 
@@ -57,7 +57,7 @@ Prompt for the other repo:
 - Never run `git push` automatically.
 - Before every commit, show exact intended files and ask for confirmation. Never commit without it.
 - Never run `git reset --hard` without explicit risk confirmation.
-- Keep FC and SFOS commits, approvals, pushes, tags, and releases separate.
+- Keep FC and FRAG commits, approvals, pushes, tags, and releases separate.
 
 ## File and data safety
 
