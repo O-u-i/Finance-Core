@@ -15,7 +15,7 @@ Explain work in beginner-friendly Chinese. English identifiers and code comments
 - FC 3.0.0 public APIs are rooted at `/api/v3`; every finance endpoint is explicitly scoped by `/workspaces/{workspaceId}`.
 - Patch releases are compatible fixes. Minor releases may add endpoints or optional fields. Removing, renaming, changing requiredness, or changing semantics requires a new major version.
 - FC is the only runtime allowed to write its finance SQLite.
-- FC UI remains generic and may display the selected personal Vault. Its Chinese/English switch belongs only to the standalone UI; the FRAG plugin bundle remains English. Synthetic loading is allowed only in an empty sandbox Vault.
+- FC UI remains generic and may display the selected personal Vault. The standalone UI and FRAG plugin bundle use English only. Synthetic loading is allowed only in an empty sandbox Vault.
 - A User, Workspace/Vault, and finance Account are different concepts. Each Vault owns one complete finance SQLite; never implement a process-global current database.
 - Every major release must add a versioned, rendered, visually verified project Horizon PDF under `docs/pdf/`. Horizon candidates are not implemented commitments.
 
@@ -61,7 +61,7 @@ Prompt for the other repo:
 
 ## File and data safety
 
-禁止批量删除文件或目录。不要使用 `del /s`, `rd /s`, `rmdir /s`, `Remove-Item -Recurse`, or `rm -rf`.
+Never delete files or directories in a batch. Do not use `del /s`, `rd /s`, `rmdir /s`, `Remove-Item -Recurse`, or `rm -rf`.
 
 When deletion is approved, delete only one explicit file path at a time. If multiple files or a directory must be removed, stop and ask the user to do it manually.
 
