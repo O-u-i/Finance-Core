@@ -6,17 +6,9 @@ The standalone UI and the optional plugin use English. FC does not import FRAG, 
 
 ## Architecture
 
-```mermaid
-flowchart TD
-    UI["Standalone FC UI"] --> API["FastAPI /api/v3"]
-    Plugin["Optional FRAG plugin"] --> API
-    API --> Access["Authentication and Workspace scope"]
-    Access --> Application["Application operations"]
-    Application --> Domain["Deterministic finance domain"]
-    Application --> Ports["Repository ports"]
-    Ports --> Registry["Registry SQLite"]
-    Ports --> Vault["One ledger SQLite per Vault"]
-```
+![Finance Core architecture](docs/architecture/finance-core-overview/finance-core-overview.svg)
+
+The diagram has an [editable Archify specification](docs/architecture/finance-core-overview/finance-core-overview.archify.json) and a [standalone interactive viewer](docs/architecture/finance-core-overview/finance-core-overview.html) that can be downloaded and opened locally.
 
 The UI and plugin use HTTP contracts. Domain rules do not depend on FastAPI, SQLite, the UI, or FRAG. A User, Workspace or Vault, and finance Account are distinct concepts. Every finance request names a Workspace.
 

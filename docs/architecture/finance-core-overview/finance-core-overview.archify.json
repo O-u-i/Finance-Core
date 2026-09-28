@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Finance Core architecture",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "viewBox": [1380, 810]
+  },
+  "components": [
+    { "id": "standalone_ui", "type": "frontend", "label": "Standalone FC UI", "pos": [60, 245], "size": [180, 72] },
+    { "id": "frag_plugin", "type": "external", "label": "Optional FRAG plugin", "sublabel": "read-only consumer", "pos": [60, 475], "size": [180, 72] },
+    { "id": "api_v3", "type": "backend", "label": "FC API", "sublabel": "/api/v3", "pos": [330, 245], "size": [180, 72] },
+    { "id": "workspace_scope", "type": "security", "label": "Auth and Workspace scope", "pos": [600, 245], "size": [190, 72] },
+    { "id": "operations", "type": "backend", "label": "Application operations", "pos": [880, 245], "size": [190, 72] },
+    { "id": "domain", "type": "backend", "label": "Deterministic domain", "sublabel": "finance rules", "pos": [1140, 90], "size": [180, 72] },
+    { "id": "repository_ports", "type": "backend", "label": "Repository ports", "pos": [1140, 410], "size": [180, 72] },
+    { "id": "registry", "type": "database", "label": "Registry SQLite", "pos": [870, 555], "size": [180, 72] },
+    { "id": "vault_ledger", "type": "database", "label": "Vault ledger SQLite", "sublabel": "one per Vault", "pos": [1140, 555], "size": [180, 72] }
+  ],
+  "connections": [
+    { "from": "standalone_ui", "to": "api_v3", "label": "HTTP /api/v3" },
+    { "from": "frag_plugin", "to": "api_v3", "label": "bounded reads", "variant": "dashed" },
+    { "from": "api_v3", "to": "workspace_scope", "label": "authenticate" },
+    { "from": "workspace_scope", "to": "operations", "label": "authorize Workspace", "labelAt": [835, 331] },
+    { "from": "operations", "to": "domain" },
+    { "from": "operations", "to": "repository_ports" },
+    { "from": "repository_ports", "to": "registry", "label": "resolve Workspace" },
+    { "from": "repository_ports", "to": "vault_ledger", "label": "scoped finance data", "labelAt": [1230, 496] }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Independent FC", "items": ["The standalone UI calls the versioned HTTP API", "Application operations use deterministic domain rules"] },
+    { "dot": "violet", "title": "Optional consumer", "items": ["The FRAG plugin reads selected records", "Journal changes open FC's own UI"] },
+    { "dot": "emerald", "title": "Data boundary", "items": ["Every finance request names a Workspace", "Each Vault owns a separate ledger SQLite"] }
+  ]
+}
