@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 946 946" role="img" aria-label="FINCR">
+  <g fill="#000000" transform="translate(2 365)">
+    <path d="M0 1H152V40H46V86H143V126H46V209H0Z"/>
+    <path transform="translate(15.97 0)" d="M181 1H227V209H181Z"/>
+    <path transform="translate(20.32 0)" d="M262 1H305L416 145V1H462V209H416L307 75V209H262Z"/>
+    <path transform="translate(39.67 0)" d="M672 52L636 69C625 49 609 39 583 39C548 39 525 66 525 108C525 150 548 176 583 176C608 176 625 165 636 145L672 159C655 194 624 216 583 216C522 216 482 171 482 108C482 45 523 0 583 0C625 0 655 19 672 52Z"/>
+    <path transform="translate(55.02 0)" fill-rule="evenodd" d="M696 1H819C866 1 886 28 886 68C886 100 865 121 831 130L887 209H832L776 135H742V209H696ZM742 40V98H809C829 98 840 87 840 69C840 50 832 40 812 40Z"/>
+  </g>
+</svg>

@@ -499,11 +499,18 @@ def create_v2_router(
 
     @router.post("/import/drafts.csv", status_code=201)
     async def import_drafts_csv(request: Request) -> dict[str, Any]:
-        raw = (await request.body()).decode("utf-8-sig")
-        rows = list(csv.DictReader(io.StringIO(raw)))
         grouped: dict[str, dict[str, Any]] = {}
         try:
+            raw = (await request.body()).decode("utf-8-sig")
+            reader = csv.DictReader(io.StringIO(raw), strict=True)
+            fields = reader.fieldnames or []
+            required = {"entryId", "date", "description", "balancingCommodityCode", "postingId", "accountId", "side", "units", "commodityCode"}
+            if len(fields) != len(set(fields)) or not required.issubset(fields):
+                raise ValueError("CSV requires unique FC posting headers and all required fields.")
+            rows = list(reader)
             for line, row in enumerate(rows, start=2):
+                if None in row or any(value is None for value in row.values()):
+                    raise ValueError(f"CSV row {line} does not match the header width.")
                 entry_id = (row.get("entryId") or "").strip()
                 if not entry_id:
                     raise ValueError(f"CSV row {line} is missing entryId.")
@@ -535,6 +542,8 @@ def create_v2_router(
                 draft["postings"].append(posting)
             payload = DraftImportRequest(drafts=[JournalEntryDraft.model_validate(item) for item in grouped.values()])
             result = repo(request).import_drafts(payload)
+        except (UnicodeDecodeError, csv.Error) as error:
+            raise HTTPException(422, detail={"code": "INVALID_CSV", "message": "CSV must be valid UTF-8 with well-formed quoted fields."}) from error
         except Exception as error:
             raise translate(error) from error
         if result["imported"] == 0:
@@ -562,6 +571,7 @@ def create_v2_router(
         fields = [
             "entryId", "date", "description", "postingId", "accountId", "side", "units",
             "commodityCode", "valuationRate", "valuationAmount", "rateType", "cashFlowCategory",
+            "balancingCommodityCode", "payee", "source", "reference", "tags", "memo",
         ]
         writer = csv.DictWriter(output, fieldnames=fields)
         writer.writeheader()
@@ -573,6 +583,10 @@ def create_v2_router(
                     "units": posting["units"], "commodityCode": posting["commodityCode"],
                     "valuationRate": posting["valuationRate"], "valuationAmount": posting["valuationAmount"],
                     "rateType": posting["rateType"], "cashFlowCategory": posting["cashFlowCategory"],
+                    "balancingCommodityCode": entry["balancingCommodityCode"],
+                    "payee": entry.get("payee", ""), "source": entry.get("source", ""),
+                    "reference": entry.get("reference", ""), "tags": "|".join(entry.get("tags", [])),
+                    "memo": posting.get("memo", ""),
                 })
         return Response(
             "\ufeff" + output.getvalue(),

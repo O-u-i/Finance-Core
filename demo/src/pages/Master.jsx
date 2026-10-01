@@ -22,11 +22,13 @@ export default function Master({ fc }) {
         ['code', 'Code'], ['name', 'Name'], ['kind', 'Kind'], ['scale', 'Scale'], ['status', 'Status'], ['actions', 'Actions', (item) => <div className="actions"><Button disabled={fc.busy || fc.readonly} onClick={() => edit(item)}>Edit</Button><Button disabled={fc.busy || fc.readonly || item.status === 'inactive'} onClick={() => deactivate('commodities', item, 'code')}>Deactivate</Button></div>],
       ]}/>
     </Panel>}
-    {tab === 'accounts' && <Panel title={editing ? 'Edit account' : 'Financial accounts'} description="A finance account belongs to this Vault. It is different from a user or Workspace.">
-      <ResourceForm key={editing?.id || 'new'} fc={fc} initial={editing ? { ...editing, commodity: editing.allowedCommodityCodes[0] } : { type: 'asset' }} fields={[
-        ['code', 'Account code'], ['name', 'Account name'], ['type', 'Type', 'text', options(['asset', 'liability', 'equity', 'income', 'expense'])], ['subtype', 'Subtype'], ['commodity', 'Allowed commodity', 'text', commodityOptions],
-      ]} submitLabel={editing ? 'Save account' : 'Add account'} onSave={async ({ commodity, ...values }) => {
-        const result = await fc.ledger(`/accounts${editing ? '/' + encodeURIComponent(editing.id) : ''}`, { method: editing ? 'PUT' : 'POST', body: { ...values, id: editing?.id || id('account'), allowedCommodityCodes: editing && commodity === editing.allowedCommodityCodes[0] ? editing.allowedCommodityCodes : [commodity], status: editing?.status || 'active' } }, 'Account saved.');
+    {tab === 'accounts' && <Panel title={editing ? 'Edit account' : 'Financial accounts'} description="A finance account belongs to this Vault. Allow one or more registered commodity codes, separated by commas, such as CNY, MYR.">
+      <ResourceForm key={editing?.id || 'new'} fc={fc} initial={editing ? { ...editing, commodityCodes: editing.allowedCommodityCodes.join(', ') } : { type: 'asset', commodityCodes: commodityOptions[0]?.value || '' }} fields={[
+        ['code', 'Account code'], ['name', 'Account name'], ['type', 'Type', 'text', options(['asset', 'liability', 'equity', 'income', 'expense'])], ['subtype', 'Subtype'], ['commodityCodes', 'Allowed commodity codes (comma separated)'],
+      ]} submitLabel={editing ? 'Save account' : 'Add account'} onSave={async ({ commodityCodes, ...values }) => {
+        const allowed = [...new Set(commodityCodes.split(',').map(code => code.trim()).filter(Boolean))];
+        if (!allowed.length || allowed.some(code => !commodityOptions.some(option => option.value === code))) { fc.setNotice({ error: true, text: 'Register and activate each allowed commodity code before assigning it to an account.' }); return false; }
+        const result = await fc.ledger(`/accounts${editing ? '/' + encodeURIComponent(editing.id) : ''}`, { method: editing ? 'PUT' : 'POST', body: { ...values, id: editing?.id || id('account'), allowedCommodityCodes: allowed, status: editing?.status || 'active' } }, 'Account saved.');
         if (result) setEditing(null); return result;
       }}/><Table rows={fc.data.accounts} columns={[
         ['code', 'Code'], ['name', 'Name'], ['type', 'Type'], ['subtype', 'Subtype'], ['allowedCommodityCodes', 'Commodities', (item) => item.allowedCommodityCodes.join(', ')], ['status', 'Status'], ['actions', 'Actions', (item) => <div className="actions"><Button disabled={fc.busy || fc.readonly} onClick={() => edit(item)}>Edit</Button><Button disabled={fc.busy || fc.readonly || item.status === 'inactive'} onClick={() => deactivate('accounts', item, 'id')}>Deactivate</Button></div>],

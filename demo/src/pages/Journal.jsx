@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { id, localDate, validationMatches } from '../api.js';
-import { Button, Empty, Field, Panel, Steps, Table } from '../components.jsx';
+import { Button, Empty, Field, Panel, StepContent, Steps, Table } from '../components.jsx';
 
 const blankPosting = (accounts = [], commodity = 'USD', index = 0) => ({ id: id('posting'), accountId: accounts[index]?.id || accounts[0]?.id || '', side: index ? 'credit' : 'debit', units: '1', commodityCode: commodity, memo: '', cashFlowCategory: 'other', lotAllocations: [] });
 const blankDraft = (data) => {
@@ -17,12 +17,13 @@ export default function Journal({ fc }) {
   const [confirmed, setConfirmed] = useState(false);
   const [step, setStep] = useState(0);
   const [saved, setSaved] = useState(false);
-  const update = (next) => { setEditor(next); setValidation(null); setValidated(''); setConfirmed(false); setStep(0); fc.markDirty(); };
+  const edited = React.useRef(false);
+  const update = (next) => { edited.current = true; setEditor(next); setValidation(null); setValidated(''); setConfirmed(false); setStep(0); fc.markDirty(); };
   const set = (name, value) => update({ ...editor, [name]: value });
   const posting = (index, name, value) => update({ ...editor, postings: editor.postings.map((item, i) => i === index ? { ...item, [name]: value } : item) });
   const commodities = active(fc.data.commodities), accounts = active(fc.data.accounts);
   // The initial page may mount before its first query resolves. Re-seed only an untouched blank editor.
-  React.useEffect(() => { if (!editor.description && !editor.postings[0].accountId && accounts.length) setEditor(blankDraft(fc.data)); }, [accounts.length]);
+  React.useEffect(() => { if (!edited.current && !editor.description && !editor.postings[0].accountId && accounts.length) setEditor(blankDraft(fc.data)); }, [accounts.length]);
   const store = async (api, wid) => {
     const exists = saved || fc.data.drafts?.some((item) => item.draft.id === editor.id);
     const result = await api.ledger(wid, `/journal-entry-drafts${exists ? '/' + pathId(editor.id) : ''}`, { method: exists ? 'PUT' : 'POST', body: editor });
@@ -30,6 +31,7 @@ export default function Journal({ fc }) {
   };
   const save = () => fc.run(store, 'Draft saved.');
   const validate = async () => {
+    setStep(1);
     const result = await fc.run(async (api, wid) => {
       await store(api, wid);
       return api.ledger(wid, `/journal-entry-drafts/${pathId(editor.id)}/validate`, { method: 'POST' });
@@ -45,12 +47,15 @@ export default function Journal({ fc }) {
     }, 'Entry posted. It is now immutable.');
     if (result) { fc.clean(); setStep(3); setValidation(null); setValidated(''); setConfirmed(false); setSaved(false); setEditor(blankDraft(fc.data)); }
   };
-  const openDraft = (draft) => { if (!fc.canLeave()) return; setEditor(structuredClone(draft)); setSaved(true); setValidation(null); setValidated(''); setConfirmed(false); setStep(0); fc.clean(); document.querySelector('#journal-editor')?.scrollIntoView({ behavior: 'instant' }); };
+  const openDraft = (draft) => { if (!fc.canLeave()) return; edited.current = true; setEditor(structuredClone(draft)); setSaved(true); setValidation(null); setValidated(''); setConfirmed(false); setStep(0); fc.clean(); document.querySelector('#journal-editor')?.scrollIntoView({ behavior: 'instant' }); };
   return <>
+    <div className="journal-tools actions"><Button disabled={fc.busy} onClick={() => fc.navigate('data', 'import')}>Import CSV / JSON</Button><Button disabled={fc.busy} onClick={() => fc.navigate('data', 'backup')}>Export records</Button><Button disabled={fc.busy} onClick={() => fc.navigate('taccounts')}>View T-accounts</Button></div>
     <Steps labels={['Edit draft', 'Validate', 'Confirm', 'Posted']} current={step}/>
     <Panel title="Journal draft" description="Record a balanced transaction. Validate it before confirming the immutable entry." action={<Button disabled={fc.busy} onClick={() => { if (fc.canLeave()) { setEditor(blankDraft(fc.data)); setSaved(false); setValidation(null); setValidated(''); setConfirmed(false); setStep(0); fc.clean(); } }}>New draft</Button>}>
       <form id="journal-editor" onSubmit={(event) => { event.preventDefault(); save(); }}>
         <fieldset disabled={fc.busy || fc.readonly}>
+          <StepContent step={step}>
+          <div hidden={step >= 2}>
           <div className="form-grid">
             <Field label="Date" type="date" value={editor.date} required onChange={(e) => set('date', e.target.value)}/>
             <Field label="Description" value={editor.description} required onChange={(e) => set('description', e.target.value)}/>
@@ -78,8 +83,12 @@ export default function Journal({ fc }) {
             </div>
           </div>)}</div>
           <div className="actions"><Button type="button" onClick={() => update({ ...editor, postings: [...editor.postings, blankPosting(accounts, editor.balancingCommodityCode)] })}>Add posting</Button><Button type="submit">Save draft</Button><Button type="button" primary onClick={validate} disabled={!accounts.length || !editor.description.trim()}>Validate draft</Button></div>
+          </div>
+          {step === 2 && <div className="review-summary"><h3>{editor.description}</h3><p>{editor.date} · {editor.postings.length} postings · {editor.balancingCommodityCode}</p><Table rows={editor.postings} columns={[["accountId", 'Account', (p) => accounts.find((a) => a.id === p.accountId)?.name || p.accountId], ['side', 'Side'], ['units', 'Units'], ['commodityCode', 'Commodity']]}/><Button type="button" onClick={() => { setStep(0); setValidation(null); setValidated(''); setConfirmed(false); }}>Edit draft</Button></div>}
           {validation && <div className={`validation ${validation.valid ? 'success' : 'error'}`} role="status"><h3>{validation.valid ? 'Validation passed' : 'Validation failed'}</h3>{validation.preview && <p>Debit {validation.preview.debitTotal} · Credit {validation.preview.creditTotal} · Difference {validation.preview.difference}</p>}{validation.issues?.map((issue, index) => <p key={index}>{issue.path}: {issue.message}</p>)}</div>}
           {validation?.valid && <div className="confirmation"><label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)}/> I reviewed this entry. Posting is permanent; corrections require a linked reversal.</label><Button type="button" primary disabled={!canPost} onClick={post}>Confirm and post</Button></div>}
+          {step === 3 && <div className="step-result" role="status"><span aria-hidden="true">✓</span><h3>Entry posted</h3><p>The entry is immutable. Find it in the posted journal below.</p><Button type="button" primary onClick={() => setStep(0)}>Record another entry</Button></div>}
+          </StepContent>
         </fieldset>
       </form>
     </Panel>

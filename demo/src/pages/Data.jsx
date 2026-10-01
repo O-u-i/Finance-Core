@@ -1,11 +1,16 @@
 import React, { useState } from 'react';
 import { id, localDate } from '../api.js';
-import { Button, Field, Panel, ResourceForm, Select, Steps, Table, Tabs } from '../components.jsx';
+import { checkImportCSV, mapAccountingCSV, csvCommodityIssues } from '../csv.js';
+import { Button, Field, Panel, ResourceForm, RejectDialog, Select, StepContent, Steps, Table, Tabs } from '../components.jsx';
 
 function Import({ fc }) {
-  const [format, setFormat] = useState('json'), [input, setInput] = useState(''), [checked, setChecked] = useState(null), [step, setStep] = useState(0);
+  const [format, setFormat] = useState('csv'), [input, setInput] = useState(''), [checked, setChecked] = useState(null), [step, setStep] = useState(0);
   const [confirmed, setConfirmed] = useState(false), [result, setResult] = useState(null);
-  const change = (value) => { setInput(value); setChecked(null); setStep(0); setConfirmed(false); setResult(null); fc.markDirty(); };
+  const [profile, setProfile] = useState(null), [grouping, setGrouping] = useState(false), [accountMap, setAccountMap] = useState({});
+  const [rejection, setRejection] = useState(null);
+  const fileGeneration = React.useRef(0);
+  React.useEffect(() => () => { fileGeneration.current++; }, []);
+  const change = (value) => { fileGeneration.current++; setInput(value); setProfile(null); setGrouping(false); setAccountMap({}); setChecked(null); setStep(0); setConfirmed(false); setResult(null); fc.markDirty(); };
   const check = () => {
     try {
       if (format === 'json') {
@@ -14,42 +19,66 @@ function Import({ fc }) {
         if (payload.drafts.some((draft) => !draft.id || !draft.description || !Array.isArray(draft.postings) || draft.postings.length < 2)) throw new Error('Each draft needs an ID, description and at least two postings.');
         setChecked({ payload, count: payload.drafts.length });
       } else {
-        const header = input.split(/\r?\n/)[0].split(',');
-        if (!['entryId', 'postingId', 'accountId', 'side', 'units'].every((name) => header.includes(name))) throw new Error('CSV header must include entryId, postingId, accountId, side and units.');
-        if (input.trim().split(/\r?\n/).length < 2) throw new Error('CSV has no data rows.');
-        setChecked({ payload: input, count: null });
+        const inspected = checkImportCSV(input);
+        const issues = csvCommodityIssues(inspected, fc.data.commodities || [], fc.data.accounts || []);
+        if (issues.length) throw Object.assign(new Error('CSV commodity configuration is invalid.'), { code: 'CSV_COMMODITY', reasons: issues });
+        if (inspected.kind === 'accounting') {
+          setProfile(inspected);
+          if (!profile) setAccountMap(Object.fromEntries(inspected.codes.map((code) => [code, fc.data.accounts?.find((item) => item.code === code && item.status === 'active')?.id || ''])));
+          const payload = mapAccountingCSV(inspected.source, { groupingConfirmed: grouping, accountMap, accounts: fc.data.accounts || [], commodities: fc.data.commodities || [], prefix: id('csv') });
+          setChecked({ payload, count: payload.drafts.length, mapped: true });
+        } else setChecked({ payload: input, count: inspected.count });
       }
       setStep(2); setConfirmed(false); fc.setNotice(null);
-    } catch (error) { fc.setNotice({ error: true, text: error instanceof SyntaxError ? 'Enter valid JSON before checking the draft structure.' : error.message }); setChecked(null); setStep(1); }
+    } catch (error) { if (error.code === 'CSV_COMMODITY') setRejection(error.reasons || [error.message]); fc.setNotice({ error: true, text: error instanceof SyntaxError ? 'Enter valid JSON before checking the draft structure.' : error.message }); setChecked(null); setStep(1); }
   };
   const submit = async () => {
     if (!checked || !confirmed) return;
-    const payload = await fc.ledger(format === 'json' ? '/import/drafts' : '/import/drafts.csv', { method: 'POST', body: checked.payload, ...(format === 'csv' ? { headers: { 'Content-Type': 'text/csv' } } : {}) }, 'Drafts validated and imported atomically.');
+    const csv = format === 'csv' && !checked.mapped;
+    const payload = await fc.run(async (api, wid) => {
+      try { return await api.ledger(wid, csv ? '/import/drafts.csv' : '/import/drafts', { method: 'POST', body: checked.payload, ...(csv ? { headers: { 'Content-Type': 'text/csv' } } : {}) }); }
+      catch (error) { if (format === 'csv') setRejection([error.message, ...(error.issues || []).map(issue => `${issue.path || 'Posting'}: ${issue.message || issue.code || 'Invalid configuration'}`)]); throw error; }
+    }, 'Drafts validated and imported atomically.');
     if (payload) { fc.clean(); setResult(payload); setStep(3); setConfirmed(false); }
   };
   return <Panel title="Import drafts" description="Import creates unposted drafts. It never posts entries automatically.">
     <Steps labels={['Select input', 'Check structure', 'Confirm import', 'Result']} current={step}/>
     <fieldset disabled={fc.busy || fc.readonly}>
+      <StepContent step={step}>
+      <div hidden={step >= 2}>
       <Select label="Format" value={format} onChange={(value) => { setFormat(value); change(''); }} options={[{ value: 'json', label: 'JSON' }, { value: 'csv', label: 'CSV' }]}/>
-      <Field label="Choose file"><input key={format} type="file" accept={format === 'json' ? '.json,application/json' : '.csv,text/csv'} onChange={async (e) => { const file = e.target.files[0]; if (file) { try { change(await file.text()); } catch { fc.setNotice({ error: true, text: 'Cannot read this file.' }); } } }}/></Field>
+      <Field label="Choose file"><input key={format} type="file" accept={format === 'json' ? '.json,application/json' : '.csv,text/csv'} onChange={async (e) => { const file = e.target.files[0], generation = ++fileGeneration.current; if (file) { fc.markDirty(); try { const content = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer()); if (generation === fileGeneration.current) change(content); } catch { if (generation === fileGeneration.current) fc.setNotice({ error: true, text: 'Cannot read this file. Use a valid UTF-8 file.' }); } } }}/></Field>
       <Field label={format === 'json' ? 'JSON drafts' : 'CSV input'}><textarea rows={9} value={input} onChange={(e) => change(e.target.value)} placeholder={format === 'json' ? '{"drafts": [...]}' : 'entryId,postingId,accountId,side,units,…'}/></Field>
+      {profile && <div className="csv-mapping"><h3>Accounting journal mapping</h3><p>Parent references are kept as posting memos. Confirm grouping by row order: each row without a parent begins a draft, followed by its child rows. Mixed-currency drafts require explicit rates in the standard FC format.</p><label><input type="checkbox" checked={grouping} onChange={(e) => { setGrouping(e.target.checked); fc.markDirty(); }}/> Use this parent / child grouping rule.</label><div className="form-grid">{profile.codes.map((code) => <Select key={code} label={`Source account ${code}`} value={accountMap[code] || ''} options={[{ value: '', label: 'Choose an account' }, ...(fc.data.accounts || []).filter((item) => item.status === 'active').map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))]} onChange={(value) => { setAccountMap({ ...accountMap, [code]: value }); fc.markDirty(); }}/>)}</div></div>}
       <Button onClick={check} disabled={!input.trim()}>Check structure</Button>
-      {checked && !result && <div className="confirmation"><p>Structure checked{checked.count !== null ? `: ${checked.count} drafts` : ''}. The backend will validate financial rules and import the entire batch atomically.</p><label><input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)}/> Import these drafts into {fc.workspace.displayName}.</label><Button primary disabled={!confirmed} onClick={submit}>Validate and import</Button></div>}
+      </div>
+      {step === 2 && <Button onClick={() => { setStep(0); setChecked(null); setConfirmed(false); }}>Edit input</Button>}
+      {checked && !result && <div className="confirmation"><p>Structure checked{checked.count !== null ? `: ${checked.count} drafts` : ''}. The backend will validate financial rules and import the entire batch atomically.</p>{checked.mapped && <Table caption="Mapped draft preview" rows={checked.payload.drafts} columns={[["date",'Date'],['description','Description'],['balancingCommodityCode','Currency'],['postings','Postings',(draft)=>draft.postings.length]]}/>}<label><input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)}/> Import these drafts into {fc.workspace.displayName}.</label><Button primary disabled={!confirmed} onClick={submit}>Validate and import</Button></div>}
       {result && <div className="notice success" role="status">Import completed: {result.imported ?? 'all'} drafts. Review them in Journal before posting.</div>}
+      {result && <Button onClick={() => change('')}>Import another file</Button>}
+      </StepContent>
     </fieldset>
+    {rejection && <RejectDialog reasons={rejection} onClose={() => setRejection(null)}/>}
   </Panel>;
 }
 
-function Backup({ fc }) {
+export function Backup({ fc, restoreOnly = false }) {
   const [backup, setBackup] = useState(null), [name, setName] = useState('');
-  const href = (path) => `/api/v3/workspaces/${encodeURIComponent(fc.workspace.id)}${path}`;
-  return <><Panel title="Export & backup" description="Exports are private. Store downloaded files safely and outside Git."><div className="actions"><a className="button" href={href('/export')} target="_blank" rel="noreferrer">Open JSON export</a><a className="button" href={href('/export/journal-entries.csv')}>Download postings CSV</a><a className="button primary" href={href('/backup')} target="_blank" rel="noreferrer">Open SHA-256 backup</a></div></Panel>
+  const download = (path, filename, csv = false) => fc.run(async (api, wid) => {
+    const payload = await api.ledger(wid, path);
+    const content = csv ? '\ufeff' + payload.replace(/^\ufeff/, '') : JSON.stringify(payload, null, 2);
+    const url = URL.createObjectURL(new Blob([content], { type: csv ? 'text/csv;charset=utf-8' : 'application/json' }));
+    const link = document.createElement('a'); link.href = url; link.download = filename;
+    document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return { downloaded: true };
+  }, 'Export downloaded.', { write: false, reload: false });
+  return <>{!restoreOnly && <Panel title="Export & backup" description="Exports are private. Store downloaded files safely and outside Git."><p>Postings CSV includes posted entries only. Unposted imported drafts are included in JSON exports and backups.</p><div className="actions"><Button disabled={fc.busy} onClick={() => download('/export', 'finance-core-export.json')}>Download JSON export</Button><Button disabled={fc.busy} onClick={() => download('/export/journal-entries.csv', 'journal-entries-v3.csv', true)}>Download postings CSV</Button><Button primary disabled={fc.busy} onClick={() => download('/backup', 'finance-core-backup.json')}>Download SHA-256 backup</Button></div></Panel>}
     <Panel title="Restore an empty ledger" description="Restore checks the backup format, schema, hash and foreign keys. Undo is available afterward."><fieldset disabled={fc.busy || fc.readonly}><Field label="JSON backup"><input type="file" accept=".json,application/json" onChange={async (event) => { try { const file = event.target.files[0]; if (!file) return; const payload = JSON.parse(await file.text()); setBackup(payload.data || payload); setName(file.name); fc.markDirty(); } catch { setBackup(null); fc.setNotice({ error: true, text: 'Select a valid JSON backup.' }); } }}/></Field>{backup && <p>Selected: {name}</p>}<Button primary disabled={!backup} onClick={async () => { if (!confirm('Restore this backup into the empty ledger?')) return; if (await fc.ledger('/backup/restore', { method: 'POST', body: backup }, 'Backup validated and restored.')) { fc.clean(); setBackup(null); setName(''); } }}>Validate and restore</Button></fieldset></Panel></>;
 }
 
 export default function Data({ fc }) {
-  const items = [['recurring', 'Recurring drafts'], ['import', 'Import'], ['batch', 'Atomic batch'], ['backup', 'Export & backup']];
-  const tab = items.some(([key]) => key === fc.route.tab) ? fc.route.tab : 'recurring';
+  const items = [['import', 'Import'], ['backup', 'Export & backup'], ['recurring', 'Recurring drafts'], ['batch', 'Atomic batch']];
+  const tab = items.some(([key]) => key === fc.route.tab) ? fc.route.tab : 'import';
   const drafts = (fc.data.drafts || []).map(({ draft }) => ({ value: draft.id, label: draft.description }));
   const [batch, setBatch] = useState('');
   return <><Tabs items={items} value={tab} onChange={(value) => fc.navigate('data', value)}/>
