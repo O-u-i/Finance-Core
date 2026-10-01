@@ -131,7 +131,7 @@ def test_health_exposes_only_commit_shaped_release_metadata(tmp_path: Path):
         health = api.get("/api/v3/health").json()
         assert health["buildCommit"] == "a" * 40
         assert health["releaseCommit"] == "b" * 40
-        assert health["serviceVersion"] == "3.1.1"
+        assert health["serviceVersion"] == "3.2.0"
         assert health["apiVersion"] == "3.1.1"
 
 

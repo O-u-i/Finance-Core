@@ -1,4 +1,4 @@
-# Finance Core 3.1.1
+# Finance Core 3.2.0
 
 Finance Core (FC) is a local-first finance domain and data service with its own standalone UI. An optional, separately released FRAG-harness plugin can read a small, selected set of FC records. FC remains independently runnable and is the only runtime that writes its finance SQLite files.
 
@@ -34,7 +34,7 @@ npm.cmd run dev
 - API: `http://127.0.0.1:8788`
 - OpenAPI: `http://127.0.0.1:8788/docs`
 
-To start only the API, run `npm.cmd run dev:api`. The standalone UI uses the published `/api/v3` HTTP API. It never reads SQLite or backend objects directly. Its light background and primary buttons use `#EFEEE7`; Public Sans is used for body text and controls, and Libre Bodoni for headings and display text. Fonts are bundled locally.
+To start only the API, run `npm.cmd run dev:api`. The standalone UI uses the published `/api/v3` HTTP API. It never reads SQLite or backend objects directly. The React 19.3 UI uses paper white (`#F8F8F4`), ink (`#101412`), teal (`#087F68`), system fonts, and original SVG identity assets. Components are implemented locally; reference libraries are not copied.
 
 ## Workspace and Journal flow
 
@@ -64,9 +64,9 @@ Amounts, quantities, costs, prices, and rates remain canonical Decimal strings i
 
 The public API is rooted at `/api/v3`. `GET /api/v3/health` reports the API version and optional build or release commit metadata without paths or secrets. Version 3.1.1 corrects named OpenAPI response schemas for Journal and read models without changing runtime business semantics. `DraftValidationResponse` exposes `workspaceId`, `valid`, `issues`, and `preview`. Legacy `/api/v1` and `/api/v2` HTTP routes are no longer registered.
 
-Control routes cover sessions, the current user, Workspaces, access tokens, and undo. Finance routes are scoped under `/api/v3/workspaces/{workspaceId}/...`. The [released OpenAPI artifact](docs/release/finance-core-v3.1.1-openapi.json) is the detailed endpoint and field contract.
+Control routes cover sessions, the current user, Workspaces, access tokens, and undo. Finance routes are scoped under `/api/v3/workspaces/{workspaceId}/...`. The [released OpenAPI artifact](docs/release/finance-core-v3.2.0-openapi.json) is the detailed endpoint and field contract.
 
-Patch releases make compatible fixes. Minor releases may add endpoints or optional fields. Removing, renaming, changing requiredness, or changing semantics requires a new major version. FC 3.1.1's released OpenAPI artifact and manifest are in `docs/release/`.
+Patch releases make compatible fixes. Minor releases may add endpoints or optional fields. Removing, renaming, changing requiredness, or changing semantics requires a new major version. FC 3.2.0's released OpenAPI artifact and manifest are in `docs/release/`.
 
 Ordinary reversible create, update, delete, import, batch, balance-recording, and backup-restore operations return an operation ID, undo token, expiry, Workspace ID, and operation type. Undo is single-use, expires after ten minutes, and is invalidated by a later write. Posted facts use linked reversal instead of ordinary undo.
 
@@ -103,9 +103,26 @@ Do not commit real finance data, SQLite files, exports, backups, credentials, or
 ```powershell
 npm.cmd test
 npm.cmd run build
+npm.cmd run test:ui
 npm.cmd run check:versions
 npm.cmd run check:release
 python tools/build_frag_plugin.py --check
 ```
 
-The release check compares the generated OpenAPI schema and hash with the published 3.1.1 artifact. The plugin check verifies the archive contents and pinned hashes. Changes to FC and FRAG require separate review, commits, tags, and releases.
+The release check compares the generated OpenAPI schema and hash with the published API 3.1.1 artifact for product 3.2.0. The plugin check verifies the archive contents and pinned hashes. Changes to FC and FRAG require separate review, commits, tags, and releases.
+
+## React UI structure and compatibility
+
+Product 3.2.0 keeps API 3.1.1, ledger schema 2, registry schema 1, and the optional FRAG protocol-1 plugin 1.0.0. A new product version does not require the consumer to change its pinned HTTP contract. The 3.2.0 OpenAPI snapshot is semantically identical to 3.1.1. Security fixes enforce existing Workspace read/write and lifecycle boundaries.
+
+`demo/src/main.jsx` mounts the React application. The app shell owns hash navigation, session entry and Workspace selection. Feature pages own their forms. The API client and request coordinator cancel obsolete reads, retain Decimal strings and prevent duplicate writes; the backend owns calculations and persistence. Reports, plans, data operations and master data have contextual tabs. Journal steps require backend validation and explicit confirmation; changing a draft invalidates the preview. Import structure checking does not claim financial validation.
+
+Workspace archive, quarantine, restore and ledger requests share a stable per-Vault lock. Global ledger undo uses the same authorization and status rules. Quarantine/restore preflight all files, move explicit files individually, and compensate if a move or registry transaction fails. No directory purge is performed. These protections coordinate requests in one FC process; run one FC writer process for a configured data root. Filesystem movement and SQLite cannot form one crash-atomic transaction; preserve backups and seek manual review after an interrupted filesystem operation.
+
+Production output is **`dist/v3.2.0/`**, containing the frontend and `THIRD-PARTY-NOTICES.txt`. Builds overwrite stable filenames without recursively clearing output directories. Earlier ignored `dist` output is not part of the current bundle. React 19.3.0, React DOM 19.3.0 and scheduler 0.28.0 are pinned; build checks verify their reviewed MIT notices and reject legacy API routes, browser storage, bundled fonts and private data/rule assets. No website deployment is included.
+
+For synthetic local browser verification, run an isolated backend with a project-local temporary data root and set `FC_UI_API_TARGET` for the Vite proxy. The browser smoke tool uses the installed Archify Chrome transport via `ARCHIFY_SKILL_ROOT` (or the user's installed skill directory). All profiles, screenshots and synthetic data belong in ignored `.tmp/`; never point this test at a personal Vault. Existing Horizon 3.0.0 remains a candidate-direction baseline, not a promise of implemented features.
+
+Long Decimal strings are calculated with operand-sized local precision, including reporting sums and exact half-even lot allocation; the ambient Python Decimal precision cannot silently truncate these values. The HTTP schema, rounding policy and SQLite formats are unchanged. FastAPI's declared minimum is 0.121 for function-scoped dependency cleanup; the locked and tested 0.141.1 dependency is unchanged.
+
+The architecture viewer and exported SVG are generated with approved Archify 2.17.0-dev.1. Its MIT text is distributed in [LICENSE-Archify.txt](docs/architecture/finance-core-overview/LICENSE-Archify.txt); the bundled JetBrains Mono OFL notice remains embedded in both artifacts. These documentation fonts are absent from the application bundle. See [3.2.0 validation and handoff](docs/md/03-fc-v3.2-validation.md) for evidence and limits.

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import sqlite3
+from calendar import monthrange
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -10,7 +11,10 @@ from typing import Any
 from uuid import uuid4
 
 from finance_core.database import transaction
-from finance_core.ledger import complete_entry, normal_balance, quantize
+from finance_core.ledger import (
+    complete_entry, decimal_add, decimal_mul, decimal_sub, decimal_sum,
+    normal_balance, quantize, quantize_ratio,
+)
 from finance_core.models_v2 import (
     Account,
     Commodity,
@@ -89,7 +93,7 @@ class LedgerRepository:
     def save_account(self, item: Account, *, create: bool) -> Account:
         for code in item.allowed_commodity_codes:
             if self.get_commodity(code) is None:
-                raise ValueError(f"Unknown commodity: {code}")
+                raise ValueError("Account references an unknown commodity.")
         values = (
             item.code,
             item.name,
@@ -463,9 +467,12 @@ class LedgerRepository:
         for rule in self.list_recurring_rules():
             if not rule.enabled or period in rule.generated_periods or rule.start_date[:7] > period:
                 continue
+            due_date = as_of.replace(day=min(rule.day_of_month, monthrange(as_of.year, as_of.month)[1]))
+            if due_date > as_of or due_date.isoformat() < rule.start_date:
+                continue
             payload = dump(rule.template)
             payload["id"] = f"rec-{rule.id}-{period}"
-            payload["date"] = as_of.replace(day=min(rule.day_of_month, 28)).isoformat()
+            payload["date"] = due_date.isoformat()
             for index, posting in enumerate(payload["postings"]):
                 posting["id"] = f"{payload['id']}-p{index + 1}"
             draft = JournalEntryDraft.model_validate(payload)
@@ -520,7 +527,7 @@ class LedgerRepository:
         commodity_map.update({item.code: item for item in batch.commodities})
         for account in batch.accounts:
             if any(code not in commodity_map for code in account.allowed_commodity_codes):
-                raise ValueError(f"Batch account {account.id} references an unknown commodity.")
+                raise ValueError("Batch account references an unknown commodity.")
         timestamp = now_iso()
         with transaction(self.connection):
             for item in batch.commodities:
@@ -538,10 +545,10 @@ class LedgerRepository:
                 )
             for item in batch.price_quotes:
                 if item.commodity_code not in commodity_map or item.quote_commodity_code not in commodity_map:
-                    raise ValueError(f"Batch price quote {item.id} references an unknown commodity.")
+                    raise ValueError("Batch price quote references an unknown commodity.")
                 quote = commodity_map[item.quote_commodity_code]
                 if quantize(Decimal(item.price), quote.scale) != Decimal(item.price):
-                    raise ValueError(f"Batch price quote {item.id} exceeds quote commodity scale.")
+                    raise ValueError("Batch price quote exceeds quote commodity scale.")
                 self.connection.execute(
                     "INSERT INTO price_quotes_v2(id,commodity_code,quote_commodity_code,price,as_of,source) VALUES (?,?,?,?,?,?)",
                     (item.id, item.commodity_code, item.quote_commodity_code, item.price, item.as_of, item.source),
@@ -568,7 +575,7 @@ class LedgerRepository:
         rows = self.connection.execute("SELECT account_id,commodity_code,side,units FROM postings_v2").fetchall()
         for row in rows:
             group = groups[(row["account_id"], row["commodity_code"])]
-            group[row["side"]] += Decimal(row["units"])
+            group[row["side"]] = decimal_add(group[row["side"]], Decimal(row["units"]))
             group["count"] += 1
         output = []
         for (account_id, commodity), values in sorted(groups.items()):
@@ -604,9 +611,9 @@ class LedgerRepository:
             if quote:
                 cost_commodity = self.get_commodity(row["cost_commodity_code"])
                 assert cost_commodity is not None
-                market_value_decimal = quantize(Decimal(row["remaining_units"]) * Decimal(quote["price"]), cost_commodity.scale)
+                market_value_decimal = quantize(decimal_mul(Decimal(row["remaining_units"]), Decimal(quote["price"])), cost_commodity.scale)
                 market_value = canonical_decimal(market_value_decimal)
-                unrealized = canonical_decimal(market_value_decimal - Decimal(row["remaining_cost"]))
+                unrealized = canonical_decimal(decimal_sub(market_value_decimal, Decimal(row["remaining_cost"])))
             result.append({
                 "lotId": row["id"],
                 "accountId": row["account_id"],
@@ -634,24 +641,24 @@ class LedgerRepository:
         for flow in flows:
             account = self.get_account(flow["accountId"])
             if account and account.type == "asset" and account.subtype.lower() == "cash":
-                cash[flow["commodityCode"]] += Decimal(flow["balance"])
+                cash[flow["commodityCode"]] = decimal_add(cash[flow["commodityCode"]], Decimal(flow["balance"]))
         holding_cost: dict[str, Decimal] = defaultdict(Decimal)
         holding_market: dict[str, Decimal] = defaultdict(Decimal)
         missing_prices: dict[str, int] = defaultdict(int)
         realized: dict[str, Decimal] = defaultdict(Decimal)
         for item in holdings:
             currency = item["costCommodityCode"]
-            holding_cost[currency] += Decimal(item["remainingCost"])
+            holding_cost[currency] = decimal_add(holding_cost[currency], Decimal(item["remainingCost"]))
             if item["marketValue"] is None:
                 missing_prices[currency] += 1
             else:
-                holding_market[currency] += Decimal(item["marketValue"])
+                holding_market[currency] = decimal_add(holding_market[currency], Decimal(item["marketValue"]))
         realized_rows = self.connection.execute(
             "SELECT p.side,p.valuation_amount,e.balancing_commodity_code FROM postings_v2 p JOIN journal_entries_v2 e ON e.id=p.entry_id JOIN accounts_v2 a ON a.id=p.account_id WHERE a.type='income' AND lower(a.subtype) IN ('realized-gain','investment-gain')"
         ).fetchall()
         for row in realized_rows:
             amount = Decimal(row["valuation_amount"])
-            realized[row["balancing_commodity_code"]] += amount if row["side"] == "credit" else -amount
+            realized[row["balancing_commodity_code"]] = decimal_add(realized[row["balancing_commodity_code"]], amount if row["side"] == "credit" else amount.copy_negate())
         currencies = sorted(set(cash) | set(holding_cost) | set(holding_market) | set(realized))
         summaries = []
         for currency in currencies:
@@ -660,9 +667,9 @@ class LedgerRepository:
                 "cash": canonical_decimal(cash[currency]),
                 "holdingCostBasis": canonical_decimal(holding_cost[currency]),
                 "holdingMarketValue": canonical_decimal(holding_market[currency]),
-                "bookValue": canonical_decimal(cash[currency] + holding_cost[currency]),
-                "marketValue": canonical_decimal(cash[currency] + holding_market[currency]),
-                "unrealizedPnL": canonical_decimal(holding_market[currency] - holding_cost[currency]),
+                "bookValue": canonical_decimal(decimal_add(cash[currency], holding_cost[currency])),
+                "marketValue": canonical_decimal(decimal_add(cash[currency], holding_market[currency])),
+                "unrealizedPnL": canonical_decimal(decimal_sub(holding_market[currency], holding_cost[currency])),
                 "realizedPnL": canonical_decimal(realized[currency]),
                 "missingPriceCount": missing_prices[currency],
             })
@@ -691,7 +698,7 @@ class LedgerRepository:
             amount = Decimal(row["valuation_amount"])
             debit = amount if row["side"] == "debit" else Decimal(0)
             credit = amount if row["side"] == "credit" else Decimal(0)
-            totals[(row["balancing_commodity_code"], row["type"])] += normal_balance(row["type"], debit, credit)
+            totals[(row["balancing_commodity_code"], row["type"])] = decimal_add(totals[(row["balancing_commodity_code"], row["type"])], normal_balance(row["type"], debit, credit))
         currencies = sorted({key[0] for key in totals})
         return [{
             "commodityCode": currency,
@@ -700,7 +707,7 @@ class LedgerRepository:
             "equity": canonical_decimal(totals[(currency, "equity")]),
             "income": canonical_decimal(totals[(currency, "income")]),
             "expenses": canonical_decimal(totals[(currency, "expense")]),
-            "netIncome": canonical_decimal(totals[(currency, "income")] - totals[(currency, "expense")]),
+            "netIncome": canonical_decimal(decimal_sub(totals[(currency, "income")], totals[(currency, "expense")])),
         } for currency in currencies]
 
     def cash_flow(self) -> list[dict[str, Any]]:
@@ -709,8 +716,8 @@ class LedgerRepository:
             "SELECT p.side,p.units,p.commodity_code,p.cash_flow_category,a.type,a.subtype FROM postings_v2 p JOIN accounts_v2 a ON a.id=p.account_id WHERE a.type='asset' AND lower(a.subtype)='cash'"
         ).fetchall()
         for row in rows:
-            value = Decimal(row["units"]) * (1 if row["side"] == "debit" else -1)
-            groups[(row["commodity_code"], row["cash_flow_category"])] += value
+            value = Decimal(row["units"]) if row["side"] == "debit" else Decimal(row["units"]).copy_negate()
+            groups[(row["commodity_code"], row["cash_flow_category"])] = decimal_add(groups[(row["commodity_code"], row["cash_flow_category"])], value)
         return [
             {"commodityCode": commodity, "category": category, "amount": canonical_decimal(value)}
             for (commodity, category), value in sorted(groups.items())
@@ -721,8 +728,8 @@ class LedgerRepository:
         unbalanced = []
         for row in self.connection.execute("SELECT id FROM journal_entries_v2"):
             postings = self.connection.execute("SELECT side,valuation_amount FROM postings_v2 WHERE entry_id=?", (row[0],)).fetchall()
-            debit = sum((Decimal(item["valuation_amount"]) for item in postings if item["side"] == "debit"), Decimal(0))
-            credit = sum((Decimal(item["valuation_amount"]) for item in postings if item["side"] == "credit"), Decimal(0))
+            debit = decimal_sum(Decimal(item["valuation_amount"]) for item in postings if item["side"] == "debit")
+            credit = decimal_sum(Decimal(item["valuation_amount"]) for item in postings if item["side"] == "credit")
             if debit != credit:
                 unbalanced.append(row[0])
         invalid_lots = []
@@ -735,14 +742,14 @@ class LedgerRepository:
             cost = Decimal(lot["original_cost"])
             for movement in movements:
                 if movement["action"] == "dispose":
-                    units -= Decimal(movement["units"])
-                    cost -= Decimal(movement["cost"])
+                    units = decimal_sub(units, Decimal(movement["units"]))
+                    cost = decimal_sub(cost, Decimal(movement["cost"]))
                 elif movement["action"] == "restore":
-                    units += Decimal(movement["units"])
-                    cost += Decimal(movement["cost"])
+                    units = decimal_add(units, Decimal(movement["units"]))
+                    cost = decimal_add(cost, Decimal(movement["cost"]))
                 elif movement["action"] == "reverse-acquire":
-                    units -= Decimal(movement["units"])
-                    cost -= Decimal(movement["cost"])
+                    units = decimal_sub(units, Decimal(movement["units"]))
+                    cost = decimal_sub(cost, Decimal(movement["cost"]))
             if (
                 acquire_count != 1
                 or units != Decimal(lot["remaining_units"])
@@ -886,9 +893,10 @@ class LedgerRepository:
         income: dict[str, Decimal] = defaultdict(Decimal)
         expense: dict[str, Decimal] = defaultdict(Decimal)
         for item in self.list_living_accounts():
-            living[item.commodity_code] += Decimal(item.balance)
+            living[item.commodity_code] = decimal_add(living[item.commodity_code], Decimal(item.balance))
         for item in self.list_monthly_plans():
-            (income if item.kind == "income" else expense)[item.commodity_code] += Decimal(item.amount)
+            target = income if item.kind == "income" else expense
+            target[item.commodity_code] = decimal_add(target[item.commodity_code], Decimal(item.amount))
         market = {
             item["commodityCode"]: Decimal(item["holdingMarketValue"])
             for item in self.dashboard()["commoditySummaries"]
@@ -904,23 +912,23 @@ class LedgerRepository:
                 latest[item.account_id] = (item.commodity_code, Decimal(item.balance))
             totals: dict[str, Decimal] = defaultdict(Decimal)
             for commodity, value in latest.values():
-                totals[commodity] += value
+                totals[commodity] = decimal_add(totals[commodity], value)
             for commodity, value in totals.items():
                 previous = Decimal(series[commodity][-1]["value"]) if series[commodity] else value
                 series[commodity].append({
                     "recordedAt": recorded_at,
                     "value": canonical_decimal(value),
-                    "delta": canonical_decimal(value - previous),
+                    "delta": canonical_decimal(decimal_sub(value, previous)),
                 })
         return {
             "commoditySummaries": [{
                 "commodityCode": commodity,
                 "livingBalance": canonical_decimal(living[commodity]),
                 "investmentMarketValue": canonical_decimal(market.get(commodity, Decimal(0))),
-                "combinedValue": canonical_decimal(living[commodity] + market.get(commodity, Decimal(0))),
+                "combinedValue": canonical_decimal(decimal_add(living[commodity], market.get(commodity, Decimal(0)))),
                 "expectedIncome": canonical_decimal(income[commodity]),
                 "expectedExpense": canonical_decimal(expense[commodity]),
-                "expectedNet": canonical_decimal(income[commodity] - expense[commodity]),
+                "expectedNet": canonical_decimal(decimal_sub(income[commodity], expense[commodity])),
             } for commodity in currencies],
             "balanceSeries": [
                 {"commodityCode": commodity, "points": points} for commodity, points in sorted(series.items())
@@ -1026,7 +1034,7 @@ class LedgerRepository:
         for index, posting in enumerate(completed.postings):
             if posting.lot_action != "dispose":
                 continue
-            allocated = sum((Decimal(item.units) for item in posting.lot_allocations), Decimal(0))
+            allocated = decimal_sum(Decimal(item.units) for item in posting.lot_allocations)
             if allocated != Decimal(posting.units):
                 issues.append(ValidationIssue(
                     code="LOT_ALLOCATION_MISMATCH",
@@ -1089,13 +1097,13 @@ class LedgerRepository:
                     remaining_units = Decimal(row["remaining_units"])
                     remaining_cost = Decimal(row["remaining_cost"])
                     units = Decimal(allocation.units)
-                    cost = remaining_cost if units == remaining_units else quantize(
-                        remaining_cost * units / remaining_units, balancing.scale
+                    cost = remaining_cost if units == remaining_units else quantize_ratio(
+                        decimal_mul(remaining_cost, units), remaining_units, balancing.scale
                     )
-                    allocated_cost += cost
+                    allocated_cost = decimal_add(allocated_cost, cost)
                     self.connection.execute(
                         "UPDATE lots_v2 SET remaining_units=?,remaining_cost=? WHERE id=?",
-                        (canonical_decimal(remaining_units - units), canonical_decimal(remaining_cost - cost), allocation.lot_id),
+                        (canonical_decimal(decimal_sub(remaining_units, units)), canonical_decimal(decimal_sub(remaining_cost, cost)), allocation.lot_id),
                     )
                     self.connection.execute(
                         "INSERT INTO lot_movements_v2(id,lot_id,entry_id,posting_id,action,units,cost) VALUES (?,?,?,?,?,?,?)",
@@ -1103,7 +1111,7 @@ class LedgerRepository:
                     )
                 if allocated_cost != Decimal(posting.valuation_amount):
                     raise ValueError(
-                        f"Disposed asset posting valuation must equal selected lot cost: {canonical_decimal(allocated_cost)}."
+                        "Disposed asset posting valuation must equal selected lot cost."
                     )
 
     def _reverse_lot_movements(self, original_entry_id: str, reverse_entry_id: str, posting_ids: dict[str, str]) -> None:
@@ -1125,8 +1133,8 @@ class LedgerRepository:
                 self.connection.execute(
                     "UPDATE lots_v2 SET remaining_units=?,remaining_cost=? WHERE id=?",
                     (
-                        canonical_decimal(Decimal(lot["remaining_units"]) + Decimal(movement["units"])),
-                        canonical_decimal(Decimal(lot["remaining_cost"]) + Decimal(movement["cost"])),
+                        canonical_decimal(decimal_add(Decimal(lot["remaining_units"]), Decimal(movement["units"]))),
+                        canonical_decimal(decimal_add(Decimal(lot["remaining_cost"]), Decimal(movement["cost"]))),
                         lot["id"],
                     ),
                 )
@@ -1151,7 +1159,7 @@ class LedgerRepository:
         if commodity is None or commodity.status != "active":
             raise ValueError(f"{field} commodity must exist and be active.")
         if quantize(Decimal(value), commodity.scale) != Decimal(value):
-            raise ValueError(f"{field} contains more fractional digits than {commodity_code} allows.")
+            raise ValueError(f"{field} contains more fractional digits than the commodity scale allows.")
 
     def _mutable_snapshot(self) -> dict[str, list[dict[str, Any]]]:
         return {

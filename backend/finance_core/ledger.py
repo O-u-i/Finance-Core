@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_HALF_EVEN
+from decimal import Decimal, ROUND_HALF_EVEN, localcontext
 from typing import Iterable
 
 from finance_core.models_v2 import (
@@ -16,7 +16,47 @@ from finance_core.models_v2 import (
 
 def quantize(value: Decimal, scale: int) -> Decimal:
     quantum = Decimal(1).scaleb(-scale)
-    return value.quantize(quantum, rounding=ROUND_HALF_EVEN)
+    with localcontext() as context:
+        context.prec = max(28, len(value.as_tuple().digits), value.adjusted() + scale + 2)
+        return value.quantize(quantum, rounding=ROUND_HALF_EVEN)
+
+
+def decimal_add(left: Decimal, right: Decimal) -> Decimal:
+    with localcontext() as context:
+        context.prec = max(28, max(left.adjusted(), right.adjusted()) - min(left.as_tuple().exponent, right.as_tuple().exponent) + 3)
+        return left + right
+
+
+def decimal_sub(left: Decimal, right: Decimal) -> Decimal:
+    return decimal_add(left, right.copy_negate())
+
+
+def decimal_mul(left: Decimal, right: Decimal) -> Decimal:
+    with localcontext() as context:
+        context.prec = max(28, len(left.as_tuple().digits) + len(right.as_tuple().digits) + 1)
+        return left * right
+
+
+def quantize_ratio(numerator: Decimal, denominator: Decimal, scale: int) -> Decimal:
+    """Round an exact rational allocation once, using the existing half-even rule."""
+    top, top_divisor = numerator.as_integer_ratio()
+    bottom, bottom_divisor = denominator.as_integer_ratio()
+    if not bottom:
+        raise ZeroDivisionError("Allocation denominator must be nonzero.")
+    signed_top = top * bottom_divisor * (10 ** scale)
+    divisor = top_divisor * bottom
+    negative = (signed_top < 0) != (divisor < 0)
+    whole, remainder = divmod(abs(signed_top), abs(divisor))
+    if remainder * 2 > abs(divisor) or (remainder * 2 == abs(divisor) and whole % 2):
+        whole += 1
+    return Decimal((int(negative), tuple(int(digit) for digit in str(whole)), -scale))
+
+
+def decimal_sum(values: Iterable[Decimal]) -> Decimal:
+    result = Decimal(0)
+    for value in values:
+        result = decimal_add(result, value)
+    return result
 
 
 def issue(code: str, path: str, message: str, **details: object) -> ValidationIssue:
@@ -93,11 +133,11 @@ def complete_entry(
             rate = Decimal(posting.valuation_rate)
             rate_type = posting.rate_type
 
-        amount = quantize(units * rate, balancing.scale)
+        amount = quantize(decimal_mul(units, rate), balancing.scale)
         if posting.side == "debit":
-            debit_total += amount
+            debit_total = decimal_add(debit_total, amount)
         else:
-            credit_total += amount
+            credit_total = decimal_add(credit_total, amount)
         completed.append(CompletedPosting(
             id=posting.id,
             accountId=posting.account_id,
@@ -114,7 +154,7 @@ def complete_entry(
             lotAllocations=posting.lot_allocations,
         ))
 
-    difference = quantize(debit_total - credit_total, balancing.scale)
+    difference = quantize(decimal_sub(debit_total, credit_total), balancing.scale)
     if difference != 0:
         issues.append(issue(
             "ENTRY_NOT_BALANCED",
@@ -143,9 +183,9 @@ def complete_entry(
 
 
 def normal_balance(account_type: str, debit: Decimal, credit: Decimal) -> Decimal:
-    return debit - credit if account_type in {"asset", "expense"} else credit - debit
+    return decimal_sub(debit, credit) if account_type in {"asset", "expense"} else decimal_sub(credit, debit)
 
 
 def sum_decimal(values: Iterable[str]) -> str:
-    return canonical_decimal(sum((Decimal(value) for value in values), Decimal(0)))
+    return canonical_decimal(decimal_sum(Decimal(value) for value in values))
 

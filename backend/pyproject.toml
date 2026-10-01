@@ -1,10 +1,10 @@
 [project]
 name = "finance-core"
-version = "3.1.1"
+version = "3.2.0"
 description = "Local-first deterministic finance domain and data API"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-  "fastapi>=0.116,<1",
+  "fastapi>=0.121,<1",
   "pydantic>=2.11,<3",
   "uvicorn>=0.35,<1",
 ]

@@ -83,11 +83,10 @@ def transaction(connection: sqlite3.Connection) -> Iterator[None]:
     connection.execute("BEGIN IMMEDIATE")
     try:
         yield
+        connection.commit()
     except Exception:
         connection.rollback()
         raise
-    else:
-        connection.commit()
 
 
 def connect(path: str | Path = DEFAULT_DATABASE_PATH) -> sqlite3.Connection:

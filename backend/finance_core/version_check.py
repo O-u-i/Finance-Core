@@ -9,13 +9,14 @@ from finance_core.release_artifact import check as check_release_artifacts
 
 
 ROOT = Path(__file__).resolve().parents[2]
-EXPECTED = "3.1.1"
+EXPECTED = "3.2.0"
 
 
 def main() -> None:
     package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     package_lock = json.loads((ROOT / "package-lock.json").read_text(encoding="utf-8"))
     pyproject = tomllib.loads((ROOT / "backend" / "pyproject.toml").read_text(encoding="utf-8"))
+    uv_lock = tomllib.loads((ROOT / "backend" / "uv.lock").read_text(encoding="utf-8"))
     init_text = (ROOT / "backend" / "finance_core" / "__init__.py").read_text(encoding="utf-8")
     index_text = (ROOT / "index.html").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -24,6 +25,7 @@ def main() -> None:
         "package-lock.json": package_lock["version"],
         "package-lock root": package_lock["packages"][""]["version"],
         "backend/pyproject.toml": pyproject["project"]["version"],
+        "backend/uv.lock": next(item["version"] for item in uv_lock["package"] if item["name"] == "finance-core"),
         "finance_core.__version__": re.search(r'__version__\s*=\s*"([^"]+)"', init_text).group(1),  # type: ignore[union-attr]
     }
     mismatches = {name: value for name, value in values.items() if value != EXPECTED}

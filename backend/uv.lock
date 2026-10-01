@@ -81,7 +81,7 @@ wheels = [
 
 [[package]]
 name = "finance-core"
-version = "3.1.1"
+version = "3.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -97,7 +97,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", specifier = ">=0.116,<1" },
+    { name = "fastapi", specifier = ">=0.121,<1" },
     { name = "pydantic", specifier = ">=2.11,<3" },
     { name = "uvicorn", specifier = ">=0.35,<1" },
 ]

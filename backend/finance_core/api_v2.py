@@ -76,13 +76,17 @@ def repo(request: Request) -> LedgerRepository:
 
 
 def translate(error: Exception) -> HTTPException:
+    if isinstance(error, ValidationError):
+        return HTTPException(422, detail={
+            "code": "INVALID_REQUEST", "message": "Request does not match the Finance Core API contract."
+        })
     if isinstance(error, LookupError):
         return HTTPException(404, detail={"code": "RESOURCE_NOT_FOUND", "message": str(error)})
     if isinstance(error, sqlite3.IntegrityError):
         return HTTPException(409, detail={
             "code": "RESOURCE_CONFLICT", "message": "Resource state conflicts with the requested operation."
         })
-    if isinstance(error, (ValueError, ValidationError)):
+    if isinstance(error, ValueError):
         return HTTPException(422, detail={"code": "INVALID_REQUEST", "message": str(error)})
     return HTTPException(500, detail={
         "code": "REQUEST_FAILED", "message": "Finance Core could not complete the operation."

@@ -12,6 +12,8 @@ tools/__pycache__/
 
 # Local agent instructions and design tooling are outside the application.
 AGENTS.md
+AGENTS.override.md
+.codex/
 .agents/
 docs/codex-skills/
 scripts/check-skill-lock.mjs
@@ -58,6 +60,8 @@ exports/
 !docs/release/finance-core-frag-plugin-v1.0.0.zip
 *.7z
 private/
+docs/architecture/**/*.visual-check.json
+docs/architecture/**/*.visual-check.html
 personal/
 real-data/
 attachments/

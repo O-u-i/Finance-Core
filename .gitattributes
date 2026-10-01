@@ -1,0 +1,19 @@
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.html text eol=lf
+*.toml text eol=lf
+*.lock text eol=lf
+*.json text eol=lf
+*.txt text eol=lf
+plugins/finance-core/*.py text eol=lf
+plugins/finance-core/*.js text eol=lf
+plugins/finance-core/*.json text eol=lf
+docs/release/*.json text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.mjs text eol=lf
+*.css text eol=lf
+*.svg text eol=lf
+*.zip binary
+*.pdf binary

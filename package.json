@@ -1,6 +1,6 @@
 {
   "name": "finance-core",
-  "version": "3.1.1",
+  "version": "3.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,13 +8,18 @@
     "dev:api": "uv run --offline --no-sync --project backend --cache-dir .tmp/uv-cache uvicorn finance_core.main:app --host 127.0.0.1 --port 8788 --reload --reload-dir backend/finance_core",
     "dev:demo": "vite --host 127.0.0.1 --port 5174",
     "test": "uv run --offline --no-sync --project backend --cache-dir .tmp/uv-cache pytest -q -p no:cacheprovider",
-    "build": "vite build",
+    "build": "node tools/frontend_notices.mjs && vite build && node tools/frontend_notices.mjs --check",
     "check:versions": "uv run --offline --no-sync --project backend --cache-dir .tmp/uv-cache python -m finance_core.version_check",
     "check:release": "uv run --offline --no-sync --project backend --cache-dir .tmp/uv-cache python -m finance_core.release_artifact --check",
-    "build:release": "uv run --offline --no-sync --project backend --cache-dir .tmp/uv-cache python -m finance_core.release_artifact"
+    "build:release": "uv run --offline --no-sync --project backend --cache-dir .tmp/uv-cache python -m finance_core.release_artifact",
+    "test:ui": "node --test demo/tests/*.test.mjs"
   },
   "devDependencies": {
     "concurrently": "^10.0.4",
     "vite": "^6.0.7"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   }
 }

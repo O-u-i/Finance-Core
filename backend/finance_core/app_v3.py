@@ -128,7 +128,7 @@ def create_app(
             if payload.get("workspaceId") is None:
                 payload["workspaceId"] = workspace_id
             if response.status_code < 400 and is_reversible_ledger_mutation(request) and "undo" not in payload:
-                item = request.state.ledger_repository.latest_undo()
+                item = getattr(request.state, "operation_undo", None)
                 if item:
                     operation_type = f"ledger.{request.method.lower()}.{request.url.path.rsplit('/', 1)[-1]}"
                     payload["undo"] = {

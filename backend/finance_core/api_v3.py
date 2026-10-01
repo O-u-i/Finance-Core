@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, AsyncIterator, Literal
 from uuid import uuid4
@@ -83,6 +84,8 @@ def authenticate(
     actor = store.authenticate_token(explicit_bearer) if explicit_bearer else store.authenticate_session(session)
     if actor is None:
         raise HTTPException(401, detail={"code": "AUTH_REQUIRED", "message": "Authentication is required."})
+    if actor.is_admin and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        require_local_origin(request)
     request.state.actor = actor
     return actor
 
@@ -93,31 +96,44 @@ def require_admin(actor: Actor = Depends(authenticate)) -> Actor:
     return actor
 
 
-async def workspace_context(
-    workspace_id: str,
-    request: Request,
-    actor: Actor = Depends(authenticate),
-) -> AsyncIterator[None]:
-    store = registry(request)
+def authorize_workspace(store: Registry, workspace_id: str, actor: Actor, *, write: bool) -> dict[str, Any]:
     workspace = store.get_workspace(workspace_id)
-    if workspace is None or (not actor.is_admin and workspace_id not in actor.workspace_ids):
-        raise HTTPException(404, detail={"code": "WORKSPACE_NOT_FOUND", "message": "Workspace was not found."})
-    method = request.method.upper()
-    write = method in {"POST", "PUT", "PATCH", "DELETE"} and not request.url.path.endswith("/validate")
-    required_scope = "ledger:write" if write else "ledger:read"
-    if not actor.is_admin and required_scope not in actor.scopes:
-        raise HTTPException(403, detail={"code": "TOKEN_SCOPE_DENIED", "message": f"{required_scope} scope is required."})
-    if workspace["status"] == "quarantined":
-        raise HTTPException(404, detail={"code": "WORKSPACE_NOT_FOUND", "message": "Workspace was not found."})
-    if workspace["status"] == "archived" and write:
-        raise HTTPException(409, detail={"code": "WORKSPACE_ARCHIVED", "message": "Archived workspaces are read-only."})
-    handle = store.vaults.get(workspace_id)
-    async with handle.lock:
+    if workspace is None or (not actor.is_admin and workspace_id not in actor.workspace_ids) or workspace['status'] == 'quarantined':
+        raise HTTPException(404, detail={'code': 'WORKSPACE_NOT_FOUND', 'message': 'Workspace was not found.'})
+    scope = 'ledger:write' if write else 'ledger:read'
+    if not actor.is_admin and scope not in actor.scopes:
+        raise HTTPException(403, detail={'code': 'TOKEN_SCOPE_DENIED', 'message': f'{scope} scope is required.'})
+    if write and workspace['status'] == 'archived':
+        raise HTTPException(409, detail={'code': 'WORKSPACE_ARCHIVED', 'message': 'Archived workspaces are read-only.'})
+    return workspace
+
+
+@asynccontextmanager
+async def ledger_context(store: Registry, workspace_id: str, actor: Actor, *, write: bool):
+    authorize_workspace(store, workspace_id, actor, write=write)
+    async with store.vaults.lock_for(workspace_id):
+        workspace = authorize_workspace(store, workspace_id, actor, write=write)
+        if not store.vaults.path_for(workspace_id).is_file():
+            raise HTTPException(409, detail={
+                'code': 'WORKSPACE_FILES_UNAVAILABLE',
+                'message': 'Workspace files require review before this ledger can be opened.',
+            })
+        handle = store.vaults.get(workspace_id)
+        yield workspace, handle
+
+
+async def workspace_context(
+    workspace_id: str, request: Request, actor: Actor = Depends(authenticate),
+) -> AsyncIterator[None]:
+    write = request.method in {'POST', 'PUT', 'PATCH', 'DELETE'} and not request.url.path.endswith('/validate')
+    async with ledger_context(registry(request), workspace_id, actor, write=write) as (workspace, handle):
         request.state.database = handle.connection
         request.state.ledger_repository = handle.repository
         request.state.workspace = workspace
         request.state.workspace_id = workspace_id
         yield
+        # Capture before releasing the lifecycle lock; middleware must not query later.
+        request.state.operation_undo = handle.repository.latest_undo() if write else None
 
 
 def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
@@ -213,14 +229,16 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
         "/workspaces/{workspace_id}", response_model=WorkspaceMutationResponse,
         responses=STANDARD_ERROR_RESPONSES, openapi_extra={"security": SESSION_SECURITY},
     )
-    def update_workspace(
+    async def update_workspace(
         workspace_id: str, payload: WorkspaceUpdate, request: Request,
         actor: Actor = Depends(require_admin),
     ) -> dict[str, Any]:
         try:
-            workspace, undo = registry(request).update_workspace(
-                workspace_id, display_name=payload.display_name, status=payload.status
-            )
+            store = registry(request)
+            async with store.vaults.lock_for(workspace_id):
+                workspace, undo = await run_in_threadpool(
+                    store.update_workspace, workspace_id, display_name=payload.display_name, status=payload.status
+                )
         except LookupError as error:
             raise HTTPException(404, detail={"code": "WORKSPACE_NOT_FOUND", "message": str(error)}) from error
         except ValueError as error:
@@ -232,11 +250,13 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
         "/workspaces/{workspace_id}", response_model=WorkspaceMutationResponse,
         responses=STANDARD_ERROR_RESPONSES, openapi_extra={"security": SESSION_SECURITY},
     )
-    def delete_workspace(
+    async def delete_workspace(
         workspace_id: str, request: Request, actor: Actor = Depends(require_admin),
     ) -> dict[str, Any]:
         try:
-            workspace, undo = registry(request).quarantine_workspace(workspace_id)
+            store = registry(request)
+            async with store.vaults.lock_for(workspace_id):
+                workspace, undo = await run_in_threadpool(store.quarantine_workspace, workspace_id)
         except LookupError as error:
             raise HTTPException(404, detail={"code": "WORKSPACE_NOT_FOUND", "message": str(error)}) from error
         except ValueError as error:
@@ -295,11 +315,7 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
     async def latest_undo(
         workspace_id: str, request: Request, actor: Actor = Depends(authenticate),
     ) -> dict[str, Any]:
-        workspace = registry(request).get_workspace(workspace_id)
-        if workspace is None or (not actor.is_admin and workspace_id not in actor.workspace_ids):
-            raise HTTPException(404, detail={"code": "WORKSPACE_NOT_FOUND", "message": "Workspace was not found."})
-        handle = registry(request).vaults.get(workspace_id)
-        async with handle.lock:
+        async with ledger_context(registry(request), workspace_id, actor, write=False) as (_, handle):
             item = await run_in_threadpool(handle.repository.latest_undo)
         return {"data": ({**item, "workspaceId": workspace_id, "operationId": item["undoToken"]} if item else None)}
 
@@ -313,7 +329,13 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
     ) -> dict[str, Any]:
         if actor.is_admin:
             try:
-                control = registry(request).undo_control(payload.undo_token)
+                store = registry(request)
+                control_id = store.control_workspace_id(payload.undo_token)
+                if control_id is not None:
+                    async with store.vaults.lock_for(control_id):
+                        control = await run_in_threadpool(store.undo_control, payload.undo_token)
+                else:
+                    control = await run_in_threadpool(store.undo_control, payload.undo_token)
             except ValueError as error:
                 raise HTTPException(409, detail={"code": "UNDO_CONFLICT", "message": str(error)}) from error
             if control is not None:
@@ -322,12 +344,8 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
             raise HTTPException(422, detail={"code": "INVALID_REQUEST", "message": "workspaceId is required for ledger undo."})
         if not actor.is_admin and (payload.workspace_id not in actor.workspace_ids or "ledger:write" not in actor.scopes):
             raise HTTPException(403, detail={"code": "TOKEN_SCOPE_DENIED", "message": "ledger:write scope is required."})
-        workspace = registry(request).get_workspace(payload.workspace_id)
-        if workspace is None or workspace["status"] == "quarantined":
-            raise HTTPException(404, detail={"code": "WORKSPACE_NOT_FOUND", "message": "Workspace was not found."})
-        handle = registry(request).vaults.get(payload.workspace_id)
         try:
-            async with handle.lock:
+            async with ledger_context(registry(request), payload.workspace_id, actor, write=True) as (_, handle):
                 result = await run_in_threadpool(handle.repository.undo, payload.undo_token)
         except ValueError as error:
             raise HTTPException(409, detail={"code": "UNDO_CONFLICT", "message": str(error)}) from error
@@ -337,8 +355,8 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
 
     scoped = create_v2_router(
         prefix="/api/v3/workspaces/{workspace_id}",
-        dependencies=[Depends(workspace_context)],
-        service_version="3.1.1",
+        dependencies=[Depends(workspace_context, scope="function")],
+        service_version=__version__,
         api_version="3.1.1",
     )
     return router, scoped

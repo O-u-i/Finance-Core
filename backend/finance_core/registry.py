@@ -73,7 +73,13 @@ class VaultManager:
     def __init__(self, data_root: Path):
         self.data_root = data_root.resolve()
         self._handles: dict[str, VaultHandle] = {}
+        self._lifecycle_locks: dict[str, asyncio.Lock] = {}
         self._guard = threading.RLock()
+
+    def lock_for(self, workspace_id: str) -> asyncio.Lock:
+        # The lock survives connection closure and quarantine/restore.
+        with self._guard:
+            return self._lifecycle_locks.setdefault(workspace_id, asyncio.Lock())
 
     def path_for(self, workspace_id: str) -> Path:
         if not re.fullmatch(r"[0-9a-f-]{36}", workspace_id):
@@ -98,7 +104,7 @@ class VaultManager:
             handle = self._handles.get(workspace_id)
             if handle is None:
                 connection = connect(self.path_for(workspace_id))
-                handle = VaultHandle(connection, LedgerRepository(connection), asyncio.Lock())
+                handle = VaultHandle(connection, LedgerRepository(connection), self.lock_for(workspace_id))
                 self._handles[workspace_id] = handle
             return handle
 
@@ -184,11 +190,10 @@ class Registry:
             self.connection.execute("BEGIN IMMEDIATE")
             try:
                 yield
+                self.connection.commit()
             except Exception:
                 self.connection.rollback()
                 raise
-            else:
-                self.connection.commit()
 
     @staticmethod
     def _workspace(row: sqlite3.Row) -> dict[str, Any]:
@@ -293,18 +298,58 @@ class Registry:
             item = Path(f"{source}{suffix}")
             if item.exists():
                 target = quarantine_root / item.name
-                item.replace(target)
                 moved.append({"source": str(item), "target": str(target)})
-        with self.transaction():
-            self.connection.execute(
-                "UPDATE workspaces SET status='quarantined',updated_at=? WHERE id=?", (now_iso(), workspace_id)
-            )
-            undo = self._save_control_undo(
-                "workspace.quarantine", workspace_id,
-                {"action": "workspace-restore", "status": workspace["status"], "moved": moved},
-                timedelta(days=30), operation_id=operation_id,
-            )
+        try:
+            with self.move_files(moved):
+                with self.transaction():
+                    self.connection.execute(
+                        "UPDATE workspaces SET status='quarantined',updated_at=? WHERE id=?", (now_iso(), workspace_id)
+                    )
+                    undo = self._save_control_undo(
+                        "workspace.quarantine", workspace_id,
+                        {"action": "workspace-restore", "status": workspace["status"], "moved": moved},
+                        timedelta(days=30), operation_id=operation_id,
+                    )
+        except Exception as error:
+            raise ValueError("Workspace quarantine failed; preserved files require review before retrying.") from error
         return self.get_workspace(workspace_id), undo  # type: ignore[return-value]
+
+    @contextmanager
+    def move_files(self, pairs: list[dict[str, str]]) -> Iterator[None]:
+        """Preflight all paths, move explicit files, compensate on commit failure."""
+        paths = [(Path(pair['source']).resolve(), Path(pair['target']).resolve()) for pair in pairs]
+        seen: set[Path] = set()
+        for source, target in paths:
+            if self.data_root not in source.parents or self.data_root not in target.parents:
+                raise ValueError("Workspace file is outside its configured root.")
+            if source in seen or target in seen or source == target:
+                raise ValueError("Workspace file plan contains conflicting paths.")
+            seen.update((source, target))
+            if not source.is_file() or target.exists():
+                raise ValueError("Workspace files changed; automatic movement is unsafe.")
+        completed: list[tuple[Path, Path]] = []
+        try:
+            for source, target in paths:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                source.replace(target)
+                completed.append((source, target))
+            yield
+        except Exception:
+            for source, target in reversed(completed):
+                if source.exists() or not target.is_file():
+                    raise ValueError("Workspace file recovery requires manual review.") from None
+                try:
+                    target.replace(source)
+                except OSError:
+                    raise ValueError("Workspace file recovery requires manual review.") from None
+            raise
+
+    @synchronized
+    def control_workspace_id(self, token: str) -> str | None:
+        row = self.connection.execute(
+            "SELECT workspace_id FROM control_undo WHERE token_digest=?", (digest(token),)
+        ).fetchone()
+        return row['workspace_id'] if row else None
 
     @synchronized
     def _save_control_undo(
@@ -335,6 +380,9 @@ class Registry:
         workspace_id = row["workspace_id"]
         action = inverse["action"]
         if action == "workspace-update":
+            workspace = self.get_workspace(workspace_id)
+            if workspace is None or workspace["status"] == "quarantined":
+                raise ValueError("Workspace state changed; undo its quarantine before restoring status.")
             with self.transaction():
                 self.connection.execute(
                     "UPDATE workspaces SET display_name=?,status=?,updated_at=? WHERE id=?",
@@ -342,19 +390,17 @@ class Registry:
                 )
                 self.connection.execute("UPDATE control_undo SET consumed_at=? WHERE token_digest=?", (now_iso(), row["token_digest"]))
         elif action == "workspace-restore":
-            for pair in inverse["moved"]:
-                source = Path(pair["source"]).resolve()
-                target = Path(pair["target"]).resolve()
-                source.parent.mkdir(parents=True, exist_ok=True)
-                if source.exists() or not target.exists():
-                    raise ValueError("Quarantined workspace files changed; automatic undo is unsafe.")
-                target.replace(source)
-            with self.transaction():
-                self.connection.execute(
-                    "UPDATE workspaces SET status=?,updated_at=? WHERE id=?",
-                    (inverse["status"], now_iso(), workspace_id),
-                )
-                self.connection.execute("UPDATE control_undo SET consumed_at=? WHERE token_digest=?", (now_iso(), row["token_digest"]))
+            pairs = [{"source": pair['target'], "target": pair['source']} for pair in inverse['moved']]
+            try:
+                with self.move_files(pairs):
+                    with self.transaction():
+                        self.connection.execute(
+                            "UPDATE workspaces SET status=?,updated_at=? WHERE id=?",
+                            (inverse["status"], now_iso(), workspace_id),
+                        )
+                        self.connection.execute("UPDATE control_undo SET consumed_at=? WHERE token_digest=?", (now_iso(), row["token_digest"]))
+            except Exception as error:
+                raise ValueError("Quarantined workspace restore failed; files and undo require review.") from error
         elif action == "quarantine-created":
             self.quarantine_workspace(workspace_id)
             with self.transaction():
