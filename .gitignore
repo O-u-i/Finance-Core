@@ -58,6 +58,7 @@ exports/
 *.webp
 *.zip
 !docs/release/finance-core-frag-plugin-v1.0.0.zip
+!docs/release/finance-core-frag-plugin-v1.1.0.zip
 *.7z
 private/
 docs/architecture/**/*.visual-check.json

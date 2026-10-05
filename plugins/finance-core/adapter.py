@@ -1,6 +1,6 @@
-"""Optional FRAG protocol 1 adapter for Finance Core API 3.1.1.
+"""Optional FRAG protocol 2 adapter for Finance Core API 3.1.1.
 
-This module is loaded by FRAG, never by the Finance Core runtime.
+The legacy read hook remains available. FRAG loads this module; FC does not.
 """
 
 from __future__ import annotations
@@ -165,26 +165,61 @@ def read_evidence(workspace_id: str, record_ids: list[str]) -> list[dict[str, st
         return [_evidence(record_id, _record(client, workspace_id, record_id)) for record_id in record_ids]
 
 
+def read_evidence_request(request: dict) -> dict:
+    """Read a strict protocol 2 request through the existing selected-record path."""
+    if (not isinstance(request, dict)
+            or set(request) != {"protocolVersion", "pluginId", "scopeId", "recordIds"}
+            or type(request.get("protocolVersion")) is not int
+            or request["protocolVersion"] != 2 or request.get("pluginId") != "finance-core"):
+        raise ValueError("Invalid evidence request.")
+    records = read_evidence(request["scopeId"], request["recordIds"])
+    return {"protocolVersion": 2, "pluginId": "finance-core", "scopeId": request["scopeId"],
+            "records": records}
+
+
+def source_revision() -> str:
+    """Bind read configuration without requiring credentials or accessing FC."""
+    configuration = {
+        "apiUrl": os.environ.get("FINANCE_CORE_PLUGIN_API_URL", "http://127.0.0.1:8788").rstrip("/"),
+        "recordsJson": os.environ.get("FINANCE_CORE_PLUGIN_RECORDS_JSON", "{}"),
+    }
+    canonical = json.dumps(configuration, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def list_scopes(scope_id: str | None = None) -> dict:
+    """List configured read candidates, optionally restricted to one Workspace."""
+    if scope_id is not None and (not isinstance(scope_id, str) or not WORKSPACE_ID.fullmatch(scope_id)):
+        raise ValueError("Invalid Workspace scope.")
+    base, token, _ui_url, selected = _settings()
+    if scope_id is not None:
+        if scope_id not in selected:
+            raise ValueError("Invalid Workspace scope.")
+        selected = {scope_id: selected[scope_id]}
+    with _client(base, token) as client:
+        _check_health(client)
+        workspaces = _workspaces(client)
+        result = []
+        for workspace_id, ids in selected.items():
+            workspace = workspaces.get(workspace_id)
+            if workspace is None:
+                if scope_id is not None:
+                    raise ValueError("Invalid Workspace scope.")
+                continue
+            records = [{"id": item, "label": _label(item, _record(client, workspace_id, item))}
+                       for item in ids]
+            result.append({"id": workspace_id, "label": workspace.get("displayName", workspace_id),
+                           "records": records})
+        return {"scopes": result}
+
+
 def create_router() -> APIRouter:
     router = APIRouter(prefix=PREFIX)
 
     @router.get("/scopes")
     def scopes() -> dict:
         try:
-            base, token, _ui_url, selected = _settings()
-            with _client(base, token) as client:
-                _check_health(client)
-                workspaces = _workspaces(client)
-                result = []
-                for workspace_id, ids in selected.items():
-                    workspace = workspaces.get(workspace_id)
-                    if workspace is None:
-                        continue
-                    records = [{"id": item, "label": _label(item, _record(client, workspace_id, item))}
-                               for item in ids]
-                    result.append({"id": workspace_id, "label": workspace.get("displayName", workspace_id),
-                                   "records": records})
-                return {"workspaces": result}
+            return {"workspaces": list_scopes()["scopes"]}
         except FcIncompatible as error:
             raise HTTPException(409, detail=str(error)) from error
         except FcUnavailable as error:

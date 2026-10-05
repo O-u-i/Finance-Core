@@ -1,4 +1,4 @@
-"""Build and verify the optional FRAG protocol 1 plugin archive."""
+"""Build and verify the optional FRAG protocol 2 plugin archive."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "plugins" / "finance-core"
-ARCHIVE = ROOT / "docs" / "release" / "finance-core-frag-plugin-v1.0.0.zip"
+ARCHIVE = ROOT / "docs" / "release" / "finance-core-frag-plugin-v1.1.0.zip"
+LEGACY_ARCHIVE = ROOT / "docs" / "release" / "finance-core-frag-plugin-v1.0.0.zip"
 NAMES = ("manifest.json", "adapter.py", "ui.js")
 
 
@@ -20,9 +21,11 @@ def sha256(data: bytes) -> str:
 def expected_manifest() -> dict:
     return {
         "id": "finance-core",
-        "protocolVersion": 1,
-        "version": "1.0.0",
-        "minHostVersion": "1.0.0",
+        "name": "Finance Core",
+        "protocolVersion": 2,
+        "version": "1.1.0",
+        "minHostVersion": "1.8.0",
+        "capabilities": ["evidence.read"],
         "fcApiVersion": "3.1.1",
         "files": {name: sha256((SOURCE / name).read_bytes()) for name in ("adapter.py", "ui.js")},
     }
