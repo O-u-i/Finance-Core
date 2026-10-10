@@ -48,16 +48,17 @@ def public_commit(value: str | None) -> str | None:
 
 def create_app(
     *,
-    data_root: str | Path = DEFAULT_DATA_ROOT,
+    data_root: str | Path | None = None,
     admin_token: str | None = None,
     build_commit: str | None = None,
     release_commit: str | None = None,
 ) -> FastAPI:
+    configured_data_root = data_root if data_root is not None else os.environ.get("FINANCE_CORE_DATA_ROOT", str(DEFAULT_DATA_ROOT))
     configured_admin_token = admin_token if admin_token is not None else os.environ.get("FINANCE_CORE_ADMIN_TOKEN", "")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        store = Registry(data_root)
+        store = Registry(configured_data_root)
         app.state.registry = store
         try:
             yield
@@ -66,7 +67,7 @@ def create_app(
 
     app = FastAPI(
         title="Finance Core API",
-        version="3.1.1",
+        version="3.2.0",
         description="Local-first deterministic finance domain and multi-vault data service.",
         lifespan=lifespan,
     )

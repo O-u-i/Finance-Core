@@ -14,6 +14,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 from pydantic import ValidationError
 
 from finance_core.contracts_v3 import (
+    AccountingCsvPreviewResponse,
     AccountListResponse,
     AccountMutationResponse,
     BEARER_OR_SESSION_SECURITY,
@@ -44,6 +45,7 @@ from finance_core.contracts_v3 import (
     MonthlyPlanDeleteResponse,
     MonthlyPlanListResponse,
     MonthlyPlanMutationResponse,
+    MonthlyReviewResponse,
     PriceQuoteDeleteResponse,
     PriceQuoteListResponse,
     PriceQuoteMutationResponse,
@@ -56,6 +58,7 @@ from finance_core.contracts_v3 import (
     WorldResponse,
 )
 from finance_core.ledger_repository import LedgerRepository, dump
+from finance_core.accounting_csv import AccountingRowsRequest, balanced_drafts
 from finance_core.models import UndoRequest
 from finance_core.models_v2 import (
     Account,
@@ -145,6 +148,8 @@ class LedgerContractRouter(APIRouter):
             ("/dashboard", "GET"): DashboardResponse,
             ("/financial-statements", "GET"): FinancialStatementListResponse,
             ("/cash-flow", "GET"): CashFlowResponse,
+            ("/reports/monthly-review", "GET"): MonthlyReviewResponse,
+            ("/import/accounting-rows/validate", "POST"): AccountingCsvPreviewResponse,
             ("/reconciliation", "GET"): ReconciliationResponse,
             ("/world", "GET"): WorldResponse,
             ("/undo/latest", "GET"): LatestUndoResponse,
@@ -487,6 +492,18 @@ def create_v2_router(
     def generate_due(request: Request, as_of: date = Body(embed=True, alias="asOf")) -> dict[str, Any]:
         return {"generatedDraftIds": repo(request).generate_due_drafts(as_of), "period": as_of.strftime("%Y-%m")}
 
+    @router.post("/import/accounting-rows/validate")
+    def accounting_preview(payload: AccountingRowsRequest, request: Request) -> dict[str, Any]:
+        try:
+            drafts = balanced_drafts(payload)
+            for draft in drafts:
+                completed, issues = repo(request).validate_draft(draft)
+                if completed is None or any(issue.severity == "error" for issue in issues):
+                    raise ValueError("Mapped drafts failed FC financial validation. No drafts were imported.")
+            return {"drafts": [dump(draft) for draft in drafts], "readOnly": True}
+        except (ValueError, ValidationError) as error:
+            raise translate(error) from error
+
     @router.post("/import/drafts", status_code=201)
     def import_drafts(payload: DraftImportRequest, request: Request) -> dict[str, Any]:
         try:
@@ -622,6 +639,13 @@ def create_v2_router(
     @router.get("/cash-flow")
     def cash_flow(request: Request) -> dict[str, Any]:
         return {"data": repo(request).cash_flow()}
+
+    @router.get("/reports/monthly-review")
+    def monthly_review_report(month: str, request: Request) -> dict[str, Any]:
+        try:
+            return {"data": repo(request).monthly_review(month), "readOnly": True}
+        except ValueError as error:
+            raise translate(error) from error
 
     @router.get("/reconciliation")
     def reconciliation(request: Request) -> dict[str, Any]:

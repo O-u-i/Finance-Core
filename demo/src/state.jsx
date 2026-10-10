@@ -3,7 +3,7 @@ import { createClient, createCoordinator } from './api.js';
 
 const client = createClient();
 export { views, parseRoute } from './navigation.js';
-import { views, parseRoute, assessSetup } from './navigation.js';
+import { viewPaths, parseRoute, assessSetup } from './navigation.js';
 
 export function useFinance() {
   const gate = useRef(createCoordinator()).current;
@@ -52,7 +52,7 @@ export function useFinance() {
     if (!selected) return;
     const ticket = gate.read(); setLoading(true);
     try {
-      const paths = { commodities: '/commodities', accounts: '/accounts', ...views[view][1] };
+      const paths = { commodities: '/commodities', accounts: '/accounts', ...viewPaths(view, nextRoute?.tab ?? routeRef.current.tab) };
       const result = Object.fromEntries(await Promise.all(Object.entries(paths).map(async ([key, path]) => {
         const payload = await client.ledger(selected.id, path, { signal: ticket.signal });
         return [key, Object.hasOwn(payload, 'data') ? payload.data : payload];
@@ -78,7 +78,7 @@ export function useFinance() {
   const canLeave = useCallback(() => !gate.writing && (!dirty.current.size || confirm('Discard unsaved changes?')), [gate]);
   const transition = useCallback((next) => {
     setOneTimeToken(''); setNotice(null);
-    if (next.view !== routeRef.current.view) refresh(workspaceRef.current, next.view, next);
+    if (next.view !== routeRef.current.view || (next.view === 'monthlyreview' && next.tab !== routeRef.current.tab)) refresh(workspaceRef.current, next.view, next);
     else { gate.invalidate(); setLoading(false); dirty.current.clear(); routeRef.current = next; setRoute(next); }
   }, [gate, refresh]);
   useEffect(() => {

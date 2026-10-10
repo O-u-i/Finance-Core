@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -169,6 +169,62 @@ class LivingAccountDeleteResponse(FlexibleContractModel):
 
 class WorkspaceLedgerResponse(ContractModel):
     workspace_id: str = Field(alias="workspaceId")
+
+
+MonthlyAmount = Annotated[str, Field(pattern=r"^-?(0|[1-9][0-9]*)(\.[0-9]+)?$")]
+
+
+class MonthlyReviewCurrency(ContractModel):
+    commodity_code: str = Field(alias="commodityCode")
+    cash_inflow: MonthlyAmount = Field(alias="cashInflow")
+    cash_outflow: MonthlyAmount = Field(alias="cashOutflow")
+    cash_net: MonthlyAmount = Field(alias="cashNet")
+    income: MonthlyAmount
+    expenses: MonthlyAmount
+    net_income: MonthlyAmount = Field(alias="netIncome")
+    cash_adjustment: MonthlyAmount = Field(alias="cashAdjustment")
+    income_adjustment: MonthlyAmount = Field(alias="incomeAdjustment")
+    expense_adjustment: MonthlyAmount = Field(alias="expenseAdjustment")
+    cash_net_change: MonthlyAmount | None = Field(alias="cashNetChange")
+    income_change: MonthlyAmount | None = Field(alias="incomeChange")
+    expenses_change: MonthlyAmount | None = Field(alias="expensesChange")
+
+
+class MonthlyReviewMonth(ContractModel):
+    month: str = Field(pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$")
+    posted_entry_count: int = Field(alias="postedEntryCount", ge=0)
+    reversal_entry_count: int = Field(alias="reversalEntryCount", ge=0)
+    other_category_posting_count: int = Field(alias="otherCategoryPostingCount", ge=0)
+    currencies: list[MonthlyReviewCurrency]
+
+
+class MonthlyReviewCoverage(ContractModel):
+    ledger_calculation: Literal["complete", "blocked"] = Field(alias="ledgerCalculation")
+    external_completeness: Literal["unknown"] = Field(alias="externalCompleteness")
+    account_classification: Literal["current-account-definitions"] = Field(alias="accountClassification")
+    invalid_date_entry_count: int = Field(alias="invalidDateEntryCount", ge=0)
+
+
+class MonthlyReview(ContractModel):
+    schema_version: Literal[1] = Field(alias="schemaVersion")
+    calculation_version: Literal["monthly-review-v1"] = Field(alias="calculationVersion")
+    month: str = Field(pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$")
+    window_start: str = Field(alias="windowStart")
+    window_end_exclusive: str = Field(alias="windowEndExclusive")
+    status: Literal["ready", "blocked"]
+    revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    months: list[MonthlyReviewMonth] = Field(max_length=3)
+    coverage: MonthlyReviewCoverage
+
+
+class MonthlyReviewResponse(WorkspaceLedgerResponse):
+    data: MonthlyReview
+    read_only: Literal[True] = Field(alias="readOnly")
+
+
+class AccountingCsvPreviewResponse(WorkspaceLedgerResponse):
+    drafts: list[JournalEntryDraft]
+    read_only: Literal[True] = Field(alias="readOnly")
 
 
 class ReversibleWorkspaceLedgerResponse(WorkspaceLedgerResponse):

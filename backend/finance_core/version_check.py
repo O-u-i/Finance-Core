@@ -9,7 +9,7 @@ from finance_core.release_artifact import check as check_release_artifacts
 
 
 ROOT = Path(__file__).resolve().parents[2]
-EXPECTED = "3.2.0"
+EXPECTED = "3.3.0"
 
 
 def main() -> None:
@@ -20,6 +20,8 @@ def main() -> None:
     init_text = (ROOT / "backend" / "finance_core" / "__init__.py").read_text(encoding="utf-8")
     index_text = (ROOT / "index.html").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    ui_client = (ROOT / "demo" / "src" / "api.js").read_text(encoding="utf-8")
+    vite_config = (ROOT / "vite.config.js").read_text(encoding="utf-8")
     values = {
         "package.json": package["version"],
         "package-lock.json": package_lock["version"],
@@ -27,6 +29,8 @@ def main() -> None:
         "backend/pyproject.toml": pyproject["project"]["version"],
         "backend/uv.lock": next(item["version"] for item in uv_lock["package"] if item["name"] == "finance-core"),
         "finance_core.__version__": re.search(r'__version__\s*=\s*"([^"]+)"', init_text).group(1),  # type: ignore[union-attr]
+        "GUI service version": re.search(r"SERVICE_VERSION = '([^']+)'", ui_client).group(1),
+        "GUI build directory": re.search(r"outDir: 'dist/v([^']+)'", vite_config).group(1),
     }
     mismatches = {name: value for name, value in values.items() if value != EXPECTED}
     if mismatches:

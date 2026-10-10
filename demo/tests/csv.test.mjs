@@ -8,6 +8,19 @@ const accounts = ['9001','9002'].map((code,i)=>({id:`a${i}`,code,status:'active'
 const commodities = ['CNY','MYR'].map(code=>({code,status:'active'}));
 const config = {groupingConfirmed:true,accountMap:{9001:'a0',9002:'a1'},accounts,commodities,prefix:'synthetic'};
 
+test('single-currency journal requires explicit currency and consecutive key grouping',()=>{
+  const single = '日期,会计科目,责任中心,参考号（Ref.),摘要（Description）,借（Debit）,贷（Credit）\n2025/3/1,9001 Cash,,r1,Synthetic entry,1.10,\n2025/3/1,9002 Capital,,r1,Synthetic entry,,1.10';
+  const source = checkImportCSV(single).source;
+  assert.throws(()=>mapAccountingCSV(source,config),/Choose an active source currency/);
+  const result = mapAccountingCSV(source,{...config,sourceCurrency:'CNY',groupingRule:'same-key',commodities:commodities.map(item=>({...item,kind:'currency'}))});
+  assert.equal(result.drafts.length,1); assert.equal(result.drafts[0].date,'2025-03-01');
+  assert.equal(result.drafts[0].postings[0].units,'1.10');
+  assert.throws(()=>mapAccountingCSV(source,{...config,sourceCurrency:'CNY',groupingConfirmed:false}),/Confirm/);
+  assert.throws(()=>mapAccountingCSV(checkImportCSV(single.replace('9002 Capital,,r1','9002 Capital,,r2')).source,{...config,sourceCurrency:'CNY',groupingRule:'same-key',commodities:commodities.map(item=>({...item,kind:'currency'}))}),/non-zero postings/);
+  const parentDescription = checkImportCSV(single.replace('9002 Capital,,r1,Synthetic entry','9002 Capital,,r1,')).source;
+  assert.equal(mapAccountingCSV(parentDescription,{...config,sourceCurrency:'CNY',commodities:commodities.map(item=>({...item,kind:'currency'}))}).drafts.length,1);
+});
+
 test('CSV supports BOM, escaped quotes, comma and newline within a quoted field',()=>{
   const parsed=readCSV('\ufeffid,note\r\nx,"first,\nsecond ""quoted"""\r\n');
   assert.equal(parsed.rows[0].note,'first,\nsecond "quoted"');
@@ -38,4 +51,14 @@ test('orphan children, invalid dates and mixed currencies never infer grouping o
 test('missing currency and unsupported account currency block mapping',()=>{
   assert.throws(()=>mapAccountingCSV(readCSV(csv),{...config,commodities:[]}),/source currency/);
   assert.throws(()=>mapAccountingCSV(readCSV(csv),{...config,accounts:accounts.map(a=>({...a,allowedCommodityCodes:['MYR']}))}),/support/);
+});
+
+test('explicit grouping overrides parent captions; balanced mapping preserves individual rows for FC',()=>{
+  const source = readCSV(csv); source.rows[1]['摘要（Description）'] = 'Different caption';
+  const sameDate = mapAccountingCSV(source,{...config,groupingRule:'date'});
+  assert.equal(sameDate.drafts.length,1);
+  const balanced = mapAccountingCSV(source,{...config,groupingRule:'balanced'});
+  assert.equal(balanced.rows.length,2); assert.equal(balanced.drafts,undefined);
+  assert.equal(balanced.rows[1].description,'Different caption');
+  assert.equal(balanced.rows[1].postings[0].units,'1.10');
 });

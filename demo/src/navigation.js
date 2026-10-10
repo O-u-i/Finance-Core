@@ -5,13 +5,26 @@ export const views = {
   positions: ['Securities & positions', { holdings: '/holdings' }],
   cashflow: ['Cash flow', { cashFlow: '/cash-flow' }],
   statements: ['Statements', { statements: '/financial-statements' }],
+  monthlyreview: ['Monthly review', {}],
   planning: ['Living & plans', { living: '/living-accounts', snapshots: '/living-snapshots', plans: '/monthly-plans', world: '/world' }],
   data: ['Import & export', { recurring: '/recurring-entry-rules', drafts: '/journal-entry-drafts', undo: '/undo/latest' }],
   master: ['Master data', { quotes: '/price-quotes', undo: '/undo/latest' }],
   settings: ['Settings', {}],
 };
-export const mainViews = ['overview', 'journal', 'taccounts', 'positions', 'cashflow', 'statements', 'planning', 'data'];
+export const mainViews = ['overview', 'journal', 'taccounts', 'positions', 'cashflow', 'statements', 'monthlyreview', 'planning', 'data'];
 export const configurationViews = ['master', 'settings'];
+
+export function latestCompletedMonth(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit' }).formatToParts(now);
+  const year = Number(parts.find(part => part.type === 'year').value), month = Number(parts.find(part => part.type === 'month').value);
+  return `${month === 1 ? year - 1 : year}-${String(month === 1 ? 12 : month - 1).padStart(2, '0')}`;
+}
+
+export function viewPaths(view, tab = '', now = new Date()) {
+  if (view !== 'monthlyreview') return views[view][1];
+  const month = /^[0-9]{4}-(0[1-9]|1[0-2])$/.test(tab) ? tab : latestCompletedMonth(now);
+  return { monthlyReview: `/reports/monthly-review?month=${month}` };
+}
 
 export function parseRoute(hash = globalThis.location?.hash || '') {
   let [view, tab] = hash.replace(/^#\/?/, '').split('/');

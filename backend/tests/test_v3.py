@@ -29,6 +29,21 @@ def create_access_token(api: TestClient, workspace_ids: list[str], scopes: list[
     return response.json()["token"]
 
 
+def test_app_factory_honors_data_root_environment_and_explicit_override(tmp_path, monkeypatch):
+    environment_root = tmp_path / "environment"
+    explicit_root = tmp_path / "explicit"
+    monkeypatch.setenv("FINANCE_CORE_DATA_ROOT", str(environment_root))
+    with TestClient(create_app(admin_token="synthetic")) as api:
+        assert api.post("/api/v3/session", json={"adminToken": "synthetic"}).status_code == 200
+        create_workspace(api, "Environment fixture")
+    with TestClient(create_app(data_root=explicit_root, admin_token="synthetic")) as api:
+        assert api.post("/api/v3/session", json={"adminToken": "synthetic"}).status_code == 200
+        assert api.get("/api/v3/workspaces").json()["data"] == []
+    with TestClient(create_app(admin_token="synthetic")) as api:
+        assert api.post("/api/v3/session", json={"adminToken": "synthetic"}).status_code == 200
+        assert api.get("/api/v3/workspaces").json()["data"][0]["displayName"] == "Environment fixture"
+
+
 def seed_holding(api: TestClient, workspace_id: str, holding_id: str = "lot-one") -> dict:
     prefix = f"/api/v3/workspaces/{workspace_id}"
     assert api.post(prefix + "/demo/load-synthetic").status_code == 201
@@ -73,7 +88,7 @@ def test_openapi_names_responses_and_declares_security_scopes_and_errors(tmp_pat
     api = authenticated_client(tmp_path)
     try:
         schema = api.get("/openapi.json").json()
-        assert schema["info"]["version"] == "3.1.1"
+        assert schema["info"]["version"] == "3.2.0"
         schemes = schema["components"]["securitySchemes"]
         assert schemes["BearerAccessToken"]["scheme"] == "bearer"
         assert schemes["SessionCookie"] == {
@@ -131,8 +146,8 @@ def test_health_exposes_only_commit_shaped_release_metadata(tmp_path: Path):
         health = api.get("/api/v3/health").json()
         assert health["buildCommit"] == "a" * 40
         assert health["releaseCommit"] == "b" * 40
-        assert health["serviceVersion"] == "3.2.0"
-        assert health["apiVersion"] == "3.1.1"
+        assert health["serviceVersion"] == "3.3.0"
+        assert health["apiVersion"] == "3.2.0"
 
 
 def test_single_holding_is_scoped_and_hidden_across_workspaces(tmp_path: Path):

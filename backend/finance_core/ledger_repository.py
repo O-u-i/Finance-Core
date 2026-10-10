@@ -11,6 +11,7 @@ from typing import Any
 from uuid import uuid4
 
 from finance_core.database import transaction
+from finance_core.monthly_review import monthly_review, month_window
 from finance_core.ledger import (
     complete_entry, decimal_add, decimal_mul, decimal_sub, decimal_sum,
     normal_balance, quantize, quantize_ratio,
@@ -567,6 +568,24 @@ class LedgerRepository:
         }
 
     # Derived read models -------------------------------------------------
+    def monthly_review(self, month: str) -> dict[str, Any]:
+        _, start, end = month_window(month)
+        if month >= datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m"):
+            raise ValueError("Monthly review requires a completed calendar month (Asia/Shanghai).")
+        self.connection.execute("SAVEPOINT monthly_review_read")
+        try:
+            entries = [dict(row) for row in self.connection.execute(
+                "SELECT id,date,balancing_commodity_code,reversal_of FROM journal_entries_v2 ORDER BY id")]
+            postings = [dict(row) for row in self.connection.execute(
+                "SELECT p.id,p.entry_id,p.account_id,p.side,p.units,p.commodity_code,"
+                "p.valuation_amount,p.cash_flow_category,a.type,a.subtype "
+                "FROM postings_v2 p JOIN journal_entries_v2 e ON e.id=p.entry_id "
+                "JOIN accounts_v2 a ON a.id=p.account_id WHERE e.date>=? AND e.date<? "
+                "ORDER BY p.entry_id,p.sort_order", (start, end))]
+            return monthly_review(month, entries, postings)
+        finally:
+            self.connection.execute("RELEASE monthly_review_read")
+
     def account_flows(self) -> list[dict[str, Any]]:
         accounts = {item.id: item for item in self.list_accounts()}
         groups: dict[tuple[str, str], dict[str, Decimal | int]] = defaultdict(

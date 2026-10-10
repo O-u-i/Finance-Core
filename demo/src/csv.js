@@ -26,7 +26,9 @@ export function readCSV(text) {
 }
 
 const sourceColumns = ['日期', '会计科目', '责任中心', '参考号（Ref.)', '摘要（Description）', '借（Debit）CNY', '借（Debit）MYR', '贷（Credit）CNY', '贷（Credit）MYR', '父记录'];
-export const isAccountingCSV = ({ header }) => sourceColumns.every((name) => header.includes(name));
+const singleCurrencyColumns = [...sourceColumns.slice(0, 5), '借（Debit）', '贷（Credit）'];
+export const isAccountingCSV = ({ header }) => sourceColumns.every((name) => header.includes(name)) || singleCurrencyColumns.every((name) => header.includes(name));
+export const isSingleCurrencyCSV = ({ header }) => singleCurrencyColumns.every((name) => header.includes(name)) && !sourceColumns.every((name) => header.includes(name));
 export const sourceAccountCodes = (source) => [...new Set(source.rows.map((row) => {
   const code = row['会计科目'].trim().match(/^\d+/)?.[0];
   if (!code) throw new Error('Each source account needs an explicit leading account code.');
@@ -41,7 +43,7 @@ export function checkImportCSV(text) {
   return { kind: 'standard', source, count: new Set(source.rows.map((row) => row.entryId)).size };
 }
 
-export function csvCommodityIssues(inspected, commodities, accounts = []) {
+export function csvCommodityIssues(inspected, commodities, accounts = [], sourceCurrency = '') {
   const issues = new Set();
   const check = (code, row, balancing = false) => {
     const item = commodities.find(item => item.code === code);
@@ -51,8 +53,8 @@ export function csvCommodityIssues(inspected, commodities, accounts = []) {
   };
   inspected.source.rows.forEach((row, index) => {
     if (inspected.kind === 'accounting') {
-      for (const code of ['CNY', 'MYR']) {
-        if ([`借（Debit）${code}`, `贷（Credit）${code}`].some(column => row[column]?.trim() && !/^0+(\.0+)?$/.test(row[column].trim()))) check(code, index + 2, true);
+      for (const [code, columns] of isSingleCurrencyCSV(inspected.source) ? [[sourceCurrency, ['借（Debit）', '贷（Credit）']]] : [['CNY', ['借（Debit）CNY', '贷（Credit）CNY']], ['MYR', ['借（Debit）MYR', '贷（Credit）MYR']]]) {
+        if (columns.some(column => row[column]?.trim() && !/^0+(\.0+)?$/.test(row[column].trim()))) check(code, index + 2, true);
       }
     } else {
       const code = row.commodityCode.trim(); check(code, index + 2); check(row.balancingCommodityCode.trim(), index + 2, true);
@@ -63,39 +65,47 @@ export function csvCommodityIssues(inspected, commodities, accounts = []) {
   return [...issues];
 }
 
-export function mapAccountingCSV(source, { groupingConfirmed, accountMap, accounts, commodities, prefix }) {
-  if (!groupingConfirmed) throw new Error('Confirm how parent and child rows form drafts before checking this template.');
-  const groups = []; let group;
+export function mapAccountingCSV(source, { groupingConfirmed, accountMap, accounts, commodities, prefix, sourceCurrency = '', groupingRule = isSingleCurrencyCSV(source) ? 'description' : 'parent' }) {
+  if (!groupingConfirmed) throw new Error('Confirm the explicit row grouping rule before checking this template.');
+  const single = isSingleCurrencyCSV(source);
+  if (single && !commodities.some(item => item.code === sourceCurrency && item.kind === 'currency' && item.status === 'active')) throw new Error('Choose an active source currency explicitly for this single-currency template.');
+  if (!['parent', 'description', 'date', 'same-key', 'balanced'].includes(groupingRule) || (single && groupingRule === 'parent')) throw new Error('Choose a supported explicit grouping rule.');
+  const columns = single ? [['借（Debit）', 'debit', sourceCurrency], ['贷（Credit）', 'credit', sourceCurrency]] : [['借（Debit）CNY','debit','CNY'], ['借（Debit）MYR','debit','MYR'], ['贷（Credit）CNY','credit','CNY'], ['贷（Credit）MYR','credit','MYR']];
+  const groups = []; let group, previousKey;
   source.rows.forEach((row, index) => {
-    if (!row['父记录'].trim()) { group = []; groups.push(group); }
+    const key = JSON.stringify((groupingRule === 'date' ? ['日期', '参考号（Ref.)'] : ['日期', '参考号（Ref.)', '摘要（Description）']).map(name => row[name].trim()));
+    const starts = groupingRule === 'balanced' || (groupingRule === 'parent' ? !row['父记录'].trim() : groupingRule === 'description' ? !!row['摘要（Description）'].trim() : key !== previousKey);
+    if (starts) { group = []; groups.push(group); }
+    previousKey = key;
     if (!group) throw new Error(`CSV row ${index + 2} has no preceding parent row.`);
     group.push(row);
   });
-  return { drafts: groups.map((rows, index) => {
+  return { [groupingRule === 'balanced' ? 'rows' : 'drafts']: groups.map((rows, index) => {
     const first = rows[0], date = first['日期'].trim().replaceAll('/', '-');
     const match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(date);
     if (!match) throw new Error(`Draft ${index + 1} needs a valid date.`);
     const iso = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
     const calendarDate = new Date(`${iso}T00:00:00Z`);
     if (Number.isNaN(calendarDate.getTime()) || calendarDate.toISOString().slice(0, 10) !== iso) throw new Error(`Draft ${index + 1} has an invalid calendar date.`);
-    if (!first['摘要（Description）'].trim()) throw new Error(`Draft ${index + 1} needs a description.`);
+    if (groupingRule !== 'balanced' && !first['摘要（Description）'].trim()) throw new Error(`Draft ${index + 1} needs a description.`);
     const draftId = `${prefix}-${index + 1}`, postings = [];
     for (const row of rows) {
       if (row['日期'].trim().replaceAll('/', '-') !== date) throw new Error(`Draft ${index + 1} contains conflicting dates.`);
       const code = sourceAccountCodes({ rows: [row] })[0], accountId = accountMap[code];
       const account = accounts.find((item) => item.id === accountId && item.status === 'active');
       if (!account) throw new Error('Map every source account to an active account in this Workspace.');
-      for (const [column, side, commodityCode] of [['借（Debit）CNY','debit','CNY'], ['借（Debit）MYR','debit','MYR'], ['贷（Credit）CNY','credit','CNY'], ['贷（Credit）MYR','credit','MYR']]) {
+      for (const [column, side, commodityCode] of columns) {
         const units = row[column].trim(); if (!units || /^0+(\.0+)?$/.test(units)) continue;
         if (!/^\d+(\.\d+)?$/.test(units)) throw new Error('Amounts must be unsigned decimal strings without separators.');
         if (!commodities.some((item) => item.code === commodityCode && item.status === 'active')) throw Object.assign(new Error(`Create active source currency ${commodityCode} in Master data before importing.`), { code: 'CSV_COMMODITY' });
         if (!account.allowedCommodityCodes.includes(commodityCode)) throw Object.assign(new Error(`Mapped account ${code} does not support source currency ${commodityCode}. Update its allowed commodities in Master data.`), { code: 'CSV_COMMODITY' });
-        postings.push({ id: `${draftId}-p${postings.length + 1}`, accountId, side, units, commodityCode, cashFlowCategory: 'other', memo: [row['责任中心'], row['父记录']].filter(Boolean).join(' · ') });
+        postings.push({ id: `${draftId}-p${postings.length + 1}`, accountId, side, units, commodityCode, cashFlowCategory: 'other', memo: [row['责任中心'], row['父记录'], single && row['摘要（Description）']].filter(Boolean).join(' · ') });
       }
     }
-    if (postings.length < 2) throw new Error(`Draft ${index + 1} needs at least two non-zero postings.`);
+    if (postings.length < (groupingRule === 'balanced' ? 1 : 2)) throw new Error(`Draft ${index + 1} needs non-zero postings for the selected grouping rule.`);
     const currencies = new Set(postings.map((item) => item.commodityCode));
     if (currencies.size !== 1) throw new Error('Mixed-currency drafts need explicit valuation rates. Use the standard FC posting CSV for those drafts.');
+    if (groupingRule === 'balanced') return { id: draftId, date: iso, description: first['摘要（Description）'].trim(), reference: first['参考号（Ref.)'].trim(), postings };
     return { id: draftId, date: iso, description: first['摘要（Description）'].trim(), source: 'accounting-csv', reference: first['参考号（Ref.)'].trim(), balancingCommodityCode: postings[0].commodityCode, postings };
   }) };
 }

@@ -92,7 +92,7 @@ def create_and_post(api: TestClient, payload: dict) -> dict:
 def test_health_and_decimal_aggregate_lifecycle(tmp_path: Path):
     with client(tmp_path) as api:
         health = api.get("/api/v2/health").json()
-        assert health["apiVersion"] == "3.1.1"
+        assert health["apiVersion"] == "3.2.0"
         assert health["ledgerSchemaVersion"] == 2
         seed(api)
         payload = opening_draft()

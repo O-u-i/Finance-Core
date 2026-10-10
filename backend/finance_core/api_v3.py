@@ -147,10 +147,10 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
             "status": "ok",
             "service": "finance-core",
             "serviceVersion": __version__,
-            "apiVersion": "3.1.1",
+            "apiVersion": "3.2.0",
             "ledgerSchemaVersion": 2,
             "registrySchemaVersion": REGISTRY_SCHEMA_VERSION,
-            "supportedApiVersions": ["3.0.0", "3.1.0", "3.1.1"],
+            "supportedApiVersions": ["3.0.0", "3.1.0", "3.1.1", "3.2.0"],
             "buildCommit": request.app.state.build_commit,
             "releaseCommit": request.app.state.release_commit,
             "capabilities": [
@@ -357,6 +357,6 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
         prefix="/api/v3/workspaces/{workspace_id}",
         dependencies=[Depends(workspace_context, scope="function")],
         service_version=__version__,
-        api_version="3.1.1",
+        api_version="3.2.0",
     )
     return router, scoped

@@ -1,0 +1,228 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Finance Core 3.3.0 - Posted-ledger monthly review",
+    "locale": "en",
+    "animation": "none",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "journal",
+        "label": "CSV to posted facts",
+        "focus": [
+          "csv",
+          "mapping",
+          "preview",
+          "import",
+          "post",
+          "ledger"
+        ],
+        "note": "Balanced rows use exact decimals. Import and posting require separate human actions."
+      },
+      {
+        "id": "review",
+        "label": "Monthly evidence",
+        "focus": [
+          "ledger",
+          "report",
+          "gui",
+          "reader"
+        ],
+        "note": "Cash and accrual remain distinct; currencies stay separate and completeness stays unknown."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "input",
+      "label": "Existing local GUI"
+    },
+    {
+      "id": "operations",
+      "label": "FC validation and human actions",
+      "variant": "exception"
+    },
+    {
+      "id": "finance",
+      "label": "Workspace-owned finance"
+    }
+  ],
+  "mainPath": [
+    "csv",
+    "mapping",
+    "preview",
+    "import",
+    "post",
+    "ledger",
+    "report",
+    "reader"
+  ],
+  "nodes": [
+    {
+      "id": "csv",
+      "lane": "input",
+      "col": 0,
+      "type": "external",
+      "label": "Journal CSV",
+      "sublabel": "Local, never in Git",
+      "width": 132
+    },
+    {
+      "id": "mapping",
+      "lane": "input",
+      "col": 1,
+      "type": "frontend",
+      "label": "Explicit mapping",
+      "sublabel": "Accounts, currency, dates",
+      "width": 132
+    },
+    {
+      "id": "gui",
+      "lane": "input",
+      "col": 5,
+      "type": "frontend",
+      "label": "Monthly review",
+      "sublabel": "Existing FC Reports UI",
+      "width": 132
+    },
+    {
+      "id": "preview",
+      "lane": "operations",
+      "col": 1,
+      "type": "backend",
+      "label": "Balanced preview",
+      "sublabel": "FC Decimal validation",
+      "width": 132
+    },
+    {
+      "id": "import",
+      "lane": "operations",
+      "col": 2,
+      "type": "security",
+      "label": "Confirm import",
+      "sublabel": "Unposted drafts, atomic batch",
+      "width": 132
+    },
+    {
+      "id": "post",
+      "lane": "operations",
+      "col": 3,
+      "type": "security",
+      "label": "Confirm posting",
+      "sublabel": "Backend rules, no bypass",
+      "width": 132
+    },
+    {
+      "id": "ledger",
+      "lane": "finance",
+      "col": 3,
+      "type": "database",
+      "label": "Posted ledger",
+      "sublabel": "One isolated Vault",
+      "width": 132
+    },
+    {
+      "id": "report",
+      "lane": "finance",
+      "col": 4,
+      "type": "backend",
+      "label": "Three-month report",
+      "sublabel": "Cash vs income / expense",
+      "width": 132
+    },
+    {
+      "id": "reader",
+      "lane": "finance",
+      "col": 5,
+      "type": "backend",
+      "label": "FC reader 1.2.0",
+      "sublabel": "FRAG whole-report pack",
+      "width": 132
+    }
+  ],
+  "edges": [
+    {
+      "id": "csv-mapping",
+      "from": "csv",
+      "to": "mapping",
+      "role": "main",
+      "variant": "default"
+    },
+    {
+      "id": "mapping-preview",
+      "from": "mapping",
+      "to": "preview",
+      "role": "main",
+      "variant": "default"
+    },
+    {
+      "id": "preview-import",
+      "from": "preview",
+      "to": "import",
+      "role": "main",
+      "variant": "security"
+    },
+    {
+      "id": "import-post",
+      "from": "import",
+      "to": "post",
+      "role": "main",
+      "variant": "security"
+    },
+    {
+      "id": "post-ledger",
+      "from": "post",
+      "to": "ledger",
+      "role": "main",
+      "variant": "default"
+    },
+    {
+      "id": "ledger-report",
+      "from": "ledger",
+      "to": "report",
+      "role": "main",
+      "variant": "default"
+    },
+    {
+      "id": "report-gui",
+      "from": "report",
+      "to": "gui",
+      "role": "branch",
+      "variant": "default"
+    },
+    {
+      "id": "report-reader",
+      "from": "report",
+      "to": "reader",
+      "role": "main",
+      "variant": "default"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Source handling",
+      "items": [
+        "One-to-many rows close only when exact debits and credits balance.",
+        "First-row dates are explicit; every source date stays in memos."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Financial meaning",
+      "items": [
+        "Cash movement is not the same as income or expense.",
+        "Drafts stay excluded; account roles and reversals remain visible."
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Bounded evidence",
+      "items": [
+        "Pinned reader, exact month whitelist: whole report or reject.",
+        "Three months, separate currencies; external completeness is unknown."
+      ]
+    }
+  ]
+}

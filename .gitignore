@@ -15,12 +15,16 @@ AGENTS.md
 AGENTS.override.md
 .codex/
 .agents/
+.github/agents/
+.github/skills/
 docs/codex-skills/
 scripts/check-skill-lock.mjs
 docs/history-transition.md
 
 # Local data, imports, exports, and secrets
 .local-data/
+.local-acceptance/
+test/
 imports/
 exports/
 .env
@@ -66,3 +70,5 @@ docs/architecture/**/*.visual-check.html
 personal/
 real-data/
 attachments/
+
+!docs/release/finance-core-frag-plugin-v1.2.0.zip

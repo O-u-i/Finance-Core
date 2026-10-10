@@ -17,3 +17,7 @@ docs/release/*.json text eol=lf
 *.svg text eol=lf
 *.zip binary
 *.pdf binary
+# Preserve the exact frozen Archify specification and delivered artifact bytes.
+docs/architecture/monthly-review/*.json -text
+docs/architecture/monthly-review/*.html -text
+docs/architecture/monthly-review/*.svg -text

@@ -10,8 +10,9 @@ import Master from './pages/Master.jsx';
 import Planning from './pages/Planning.jsx';
 import Data from './pages/Data.jsx';
 import Settings from './pages/Settings.jsx';
+import MonthlyReview from './pages/MonthlyReview.jsx';
 
-const pages = { overview: Overview, journal: Journal, taccounts: Reports, positions: Reports, cashflow: Reports, statements: Reports, master: Master, planning: Planning, data: Data, settings: Settings };
+const pages = { overview: Overview, journal: Journal, taccounts: Reports, positions: Reports, cashflow: Reports, statements: Reports, monthlyreview: MonthlyReview, master: Master, planning: Planning, data: Data, settings: Settings };
 function Auth({ fc }) {
   return <div className="auth-layout"><Logo/><div className="auth-copy"><h1>Keep your finances<br/>close. See them clearly.</h1><p>A private, local workspace for your financial records.</p><div className="auth-lines" aria-hidden="true"><span/><span/><span/></div></div><Panel title="Enter your workspace" description="Sign in with your local admin token."><form onSubmit={(event) => {
     event.preventDefault(); const form = event.currentTarget, secret = new FormData(form).get('adminToken');

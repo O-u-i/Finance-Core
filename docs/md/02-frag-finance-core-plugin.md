@@ -1,79 +1,62 @@
-# Optional Finance Core plugin for FRAG-harness (v1.1.0)
+# Optional Finance Core reader for FRAG-harness (v1.2.0)
 
-Finance Core product 3.2.0 runs independently and exposes released API 3.1.1. FRAG-harness can install this separate, read-only plugin to show an FC dashboard and a small set of user-selected Journal records through FC's published HTTP API. FC domain, application, API, SQLite, and standalone UI do not depend on FRAG. Journal changes open FC's own UI, where FC authenticates the user and performs every write.
+Finance Core product 3.3.0 runs independently with API 3.2.0, ledger schema 2 and registry schema 1. Its optional protocol-2 reader exposes explicitly selected financial evidence; FC owns all calculations, authentication, storage and writes. FRAG owns authorization, bounded tool packs and reviewed Memory, not a finance runtime.
 
 ## Compatibility and artifact
 
 | Item | Required version or path |
 | --- | --- |
 | FRAG plugin protocol | 2 |
-| FRAG host | 1.8.0 or later |
-| FC API | 3.1.1 |
-| Plugin version | 1.1.0 |
+| FRAG host | 1.12.1 or later |
+| FC API | 3.2.0 |
+| Reader version | 1.2.0 |
 | Capability | `evidence.read` |
-| Archive | `docs/release/finance-core-frag-plugin-v1.1.0.zip` |
+| Archive | `docs/release/finance-core-frag-plugin-v1.2.0.zip` |
 | Source | `plugins/finance-core/manifest.json`, `adapter.py`, `ui.js` |
+| Archive SHA-256 | `9d4f66b101183b19d5e50d807386c276cc77937517a6f7d59be813971ccd1ee6` |
 
-The archive root contains exactly `manifest.json`, `adapter.py`, and `ui.js`. The manifest pins SHA-256 hashes for both code files and declares the generic read-only evidence capability. Run `python tools/build_frag_plugin.py --check` to obtain and verify the archive SHA-256 before installation. `.gitignore` has an explicit exception for this official ZIP. Git staging, commits, and publishing remain separate user decisions.
+The archive contains exactly those three root files. The manifest pins both code files; the host additionally pins exact package/archive bytes. `python tools/build_frag_plugin.py --check` verifies the current source and archive. Source files use LF so Git line-ending normalization cannot silently change the bytes. Earlier 1.0.0 and 1.1.0 archives remain unchanged historical artifacts. This is a local build handoff, not publication or production installation.
 
-The original `docs/release/finance-core-frag-plugin-v1.0.0.zip` remains byte-identical, with protocol 1 and minimum host 1.0.0. Hosts retain protocol 1 support; the new protocol 2 artifact requires host 1.8.0. FC product, API, database and plugin versions remain independent.
-
-Existing protocol 1 runtime memories remain visible in history under their original identity. FRAG host 1.8.0 binds FC evidence identities to the configured supplier and selected candidate list for both protocols. Old unqualified protocol 1 memories are not automatically recommended or injected after upgrading the host, including when continuing to use the original protocol 1 archive. Reusing an applicable lesson requires a new candidate from the current source and explicit human review/promotion. The host never silently rebinds historical memory to a new supplier.
-
-FRAG leads host policy, registries, CLI, evaluation, model providers, common plugin interfaces and integration acceptance. FC owns this plugin's editable source, its released HTTP contracts and all financial calculations, storage, authentication and standalone UI. FRAG installs pinned build output; it does not maintain a second editable FC adapter.
+`ui.js` and the adapter's legacy GET dashboard routes remain archive compatibility content. Native FRAG does not mount a plugin UI, generic catalog or Dashboard. Journal changes open standalone FC and require FC authentication.
 
 ## Backend-only configuration
 
-Configure these variables in the FRAG backend environment. Create an FC access token scoped to the intended Workspace with `ledger:read` only. Never place it in browser code, a URL, logs, screenshots, or Git.
-
-```text
+```dotenv
 FINANCE_CORE_PLUGIN_API_URL=http://127.0.0.1:8788
 FINANCE_CORE_PLUGIN_UI_URL=http://127.0.0.1:5174
-FINANCE_CORE_PLUGIN_READ_TOKEN=<backend-only-scoped-read-token>
-FINANCE_CORE_PLUGIN_RECORDS_JSON={"<workspace-uuid>":["entry:<entry-id>","draft:<draft-id>"]}
+FINANCE_CORE_PLUGIN_READ_TOKEN=<backend-only-ledger-read-token>
+FINANCE_CORE_PLUGIN_RECORDS_JSON={"<approved-workspace>":["monthly-review:2025-03"]}
 ```
 
-`FINANCE_CORE_PLUGIN_RECORDS_JSON` is an explicit candidate list selected by the local user. Across all Workspaces it may contain at most ten distinct record IDs. The plugin does not scan entire Journal lists or open the FC Registry or Vault SQLite. With no candidates, `GET /scopes` returns an empty list. Without a token, or while FC is unavailable, it returns an unavailable state. API and UI URLs must be loopback HTTP addresses.
+Use a scoped `ledger:read` token for the named Workspace. Never place credentials in browser inputs, Webview messages, tool packs, logs or Git. Endpoints must be credential-free HTTP loopback URLs. Requests do not follow redirects or inherit environment proxy settings. Installation does not authorize any source or record; humans configure the whitelist and enable the source separately.
 
-`entry:` and `draft:` IDs map to FC 3.1.1 single-record read endpoints. `GET /scopes` shows only active Workspaces accessible to the token and their configured records. `read_evidence(workspace_id, record_ids)` accepts one Workspace and one to ten distinct configured IDs. It returns one dictionary per requested ID, in the same order, with exactly `recordId`, `label`, `text`, and `revision`. The revision is the SHA-256 of FC's canonical JSON for that record. Each text is limited to 8,000 characters and summarizes date, description, status, and bounded posting fields. It is not a full ledger export.
+## Evidence hooks
 
-## Protocol 2 evidence interface
+- `list_scopes(scope_id=None)` returns configured IDs in active, token-accessible Workspaces. Monthly labels are synthesized from exact IDs; discovery never fetches every configured report.
+- `read_evidence_request(request)` accepts exactly `protocolVersion`, `pluginId`, `scopeId`, `recordIds`; protocol is integer 2. It returns the same protocol/plugin/scope and records in request order.
+- One request names one Workspace and one to ten distinct configured IDs; the total configured record whitelist is also capped at ten. Arbitrary routes, wildcard months, duplicate IDs, unlisted records and cross-Workspace expansion are rejected.
+- Each record has exactly `recordId`, `label`, `text`, `revision`. HTTP calls are GET only. FC health must identify `finance-core`, `ok` and API `3.2.0`; Workspace and record identity are validated.
+- `source_revision()` binds supplier URL and whitelist without HTTP or credentials. The host checks package/configuration revisions before and after reads and rechecks record revisions at completion.
 
-`list_scopes(scope_id=None)` returns `{"scopes": [...]}` with the same `id`, `label` and `records` fields used by the existing scope route. Each record has `id` and `label`. An optional scope ID restricts discovery to one configured, active Workspace; invalid or unconfigured IDs are rejected before any HTTP request. Discovery reads only configured records, never a complete Journal list.
+### Monthly report
 
-`read_evidence_request(request)` accepts exactly these four fields:
+`monthly-review:YYYY-MM` maps to `/api/v3/workspaces/{workspaceId}/reports/monthly-review?month=YYYY-MM`. It authorizes the exact completed anchor and preceding two months, not transaction details or a full Vault. A new anchor requires a human whitelist change.
 
-```json
-{
-  "protocolVersion": 2,
-  "pluginId": "finance-core",
-  "scopeId": "synthetic-workspace",
-  "recordIds": ["entry:synthetic-entry", "draft:synthetic-draft"]
-}
-```
+FC's strict summary includes schema/calculation version, month window, stable source revision, three month rows, per-currency exact Decimal strings, changes, signed reversal adjustments and coverage. Account roles reflect current Master data; invalid posted dates block totals; real-world completeness remains unknown. Cash and recognized income/expenses are distinct axes. Currencies are not implicitly converted or combined. No account names/IDs, Journal descriptions, references or posting memos enter the summary.
 
-The response contains exactly `protocolVersion`, `pluginId`, `scopeId` and `records`. Its scope and plugin match the request, and its records retain the requested order and the four legacy evidence fields. The host validates this envelope before binding evidence to a prepared request. These interfaces grant no authority to expand the selected Workspace or records, choose arbitrary endpoints, execute model calls or write financial data. The legacy `read_evidence` hook remains available in the adapter; protocol 2 delegates to that same bounded read implementation.
+The adapter rejects extra/missing/unsafe summary fields and emits the full report without its legacy 8,000-character truncation. The native host marks it required: byte fitting, tokenizer fitting and completion either retain it whole or reject delivery. A stable report revision excludes request timestamps and random snapshots.
 
-`source_revision()` returns a lowercase SHA-256 of a canonical JSON descriptor containing the configured read API URL (without a trailing slash) and the exact configured candidate-list JSON. It requires no token and makes no HTTP request. Credentials, authentication headers and the standalone UI URL are excluded; descriptor values are not returned or stored as part of this interface. The host pins this revision when loading the plugin, binds it into prepared source identities and parser versions, and rejects configuration changes before or during a read. After changing the supplier or configured candidates, restart FRAG and select sources again for a fresh preview and approval. A matching record-content revision alone does not preserve approval across a source-configuration change.
+### Explicit detail records
 
-## FC read contracts
+`entry:<approved-id>` and `draft:<approved-id>` map to their existing single-record endpoints. Their prior bounded formatting is unchanged, including an 8,000-character text limit. These IDs require separate explicit whitelist authorization; a report does not authorize automatic detail reads. Parent/reference source fields are context, not agent instructions or permissions.
 
-- `GET /api/v3/health` checks `service=finance-core`, `status=ok`, and `apiVersion=3.1.1`.
-- `GET /api/v3/workspaces` verifies active Workspaces accessible to the read token.
-- `GET /api/v3/workspaces/{workspaceId}/dashboard` reads FC-calculated dashboard values; money remains Decimal strings.
-- `GET /api/v3/workspaces/{workspaceId}/journal-entries/{entryId}` and `GET /api/v3/workspaces/{workspaceId}/journal-entry-drafts/{draftId}` read only configured selected records.
-
-No new FC endpoint or API version is required. The plugin exposes only `GET /api/plugins/finance-core/scopes` and `GET /api/plugins/finance-core/dashboard?workspaceId=...`. Its frontend calls only same-origin FRAG plugin routes. The backend rejects an invalid Workspace, unconfigured records, duplicates, and more than ten IDs. An incompatible FC API version returns 409; missing configuration, timeout, or FC outage returns 503. Responses and errors must not expose tokens, database paths, or private request bodies.
-
-## Verify and install
+## Build and verification
 
 ```powershell
-backend\.venv\Scripts\python.exe tools/build_frag_plugin.py --check
-npm.cmd test
+python tools/build_frag_plugin.py
+python tools/build_frag_plugin.py --check
 npm.cmd run check:release
 npm.cmd run check:versions
 ```
 
-In the FRAG repository, use its installation process with `-ArchivePath` and the checked `-ExpectedSha256`, then restart FRAG. FRAG manages installation and enabled state; this FC repository does not modify FRAG files. FRAG's `current.json` must point to plugin `1.1.0` with `enabled: true`. Only FRAG loads the plugin routes and frontend bundle. Synthetic plugin tests verify protocol 2 discovery and request rejection, source-configuration changes with identical record content, credential exclusion, its actual released FC read API, the legacy archive hash and the unchanged read-only routes. Real financial records are not test fixtures.
-
-Historical SFOS migration notes, the 3.0.0 Horizon, and v1/v2 API notes retain their historical meaning. This document describes only the current optional plugin; it does not change FC's deterministic calculations, authentication, or database write ownership.
+Default tests are synthetic: archive/file integrity, protocol validation, GET-only scope isolation, no HTTP on invalid requests, safe discovery, complete monthly formatting, strict field rejection and stable revisions. Explicit private CSV acceptance uses isolated ignored Vaults without modifying originals or calling providers; sources, raw logs, reports, databases and screenshots stay out of Git. Local contract, browser, live loopback, provider and human financial-semantic acceptance are different claims. Both repositories may be updated directly under the current unified authorization; commits, pushes, tags, public release and production installation remain separate human actions.

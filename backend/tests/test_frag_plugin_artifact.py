@@ -6,12 +6,14 @@ import importlib.util
 import json
 import sys
 import zipfile
+from copy import deepcopy
 from pathlib import Path
 
 import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from finance_core.monthly_review import monthly_review
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -25,6 +27,52 @@ spec.loader.exec_module(adapter)
 WORKSPACE = "synthetic-workspace"
 ENTRY = "entry:synthetic-entry"
 DRAFT = "draft:synthetic-draft"
+REPORT = "monthly-review:2025-03"
+
+
+def monthly_fixture():
+    return monthly_review("2025-03", [{"id": "private-entry", "date": "2025-03-01", "balancing_commodity_code": "CNY", "reversal_of": None}], [
+        {"entry_id": "private-entry", "type": "asset", "subtype": "cash", "side": "debit", "units": "1.25",
+            "valuation_amount": "1.25", "commodity_code": f"C{index:02d}", "cash_flow_category": "other"}
+        for index in range(12)])
+
+
+def test_monthly_discovery_does_not_fetch_reports_and_read_is_full_and_stable(monkeypatch):
+    configured(monkeypatch, records={WORKSPACE: [REPORT]})
+    report = monthly_fixture()
+    seen = fake_fc(monkeypatch, report=report)
+    listing = adapter.list_scopes(WORKSPACE)
+    assert listing["scopes"][0]["records"][0]["id"] == REPORT
+    assert not any("/reports/" in path for path in seen)
+    evidence = adapter.read_evidence(WORKSPACE, [REPORT])[0]
+    assert len(evidence["text"]) > 8000
+    assert evidence["text"].endswith("}") and "2025-01" in evidence["text"] and "2025-03" in evidence["text"]
+    assert "private-entry" not in evidence["text"]
+    assert "unknown" in evidence["text"] and "current-account-definitions" in evidence["text"]
+    assert evidence["revision"] == report["revision"]
+    assert adapter.read_evidence(WORKSPACE, [REPORT])[0] == evidence
+    with pytest.raises(ValueError):
+        adapter.read_evidence(WORKSPACE, ["monthly-review:2025-04"])
+
+
+@pytest.mark.parametrize("mutation", ["extra-private-field", "missing-month", "wrong-period", "wrong-coverage", "float-amount", "private-amount", "private-code"])
+def test_monthly_summary_contract_rejects_extra_missing_or_unsafe_fields(monkeypatch, mutation):
+    report = deepcopy(monthly_fixture())
+    if mutation == "extra-private-field": report["privateDescription"] = "Do not forward"
+    if mutation == "missing-month": report["months"].pop()
+    if mutation == "wrong-period": report["month"] = "2025-04"
+    if mutation == "wrong-coverage": report["coverage"]["externalCompleteness"] = "complete"
+    if mutation == "float-amount": report["months"][0]["currencies"][0]["income"] = 1.25
+    if mutation == "private-amount": report["months"][0]["currencies"][0]["income"] = "private words"
+    if mutation == "private-code": report["months"][0]["currencies"][0]["commodityCode"] = "private words"
+    configured(monkeypatch, records={WORKSPACE: [REPORT]})
+    fake_fc(monkeypatch, report=report)
+    with pytest.raises(adapter.FcUnavailable, match="invalid monthly summary"):
+        adapter.read_evidence(WORKSPACE, [REPORT])
+
+
+def test_previous_protocol2_archive_is_unchanged():
+    assert sha256((ROOT / "docs/release/finance-core-frag-plugin-v1.1.0.zip").read_bytes()) == "a96d5d2c4c8e4c8a7232db4be825925d37fb80052e74f6eab450744c62ccfacb"
 
 
 def configured(monkeypatch: pytest.MonkeyPatch, *, records: dict | None = None) -> None:
@@ -34,7 +82,7 @@ def configured(monkeypatch: pytest.MonkeyPatch, *, records: dict | None = None) 
     monkeypatch.setenv("FINANCE_CORE_PLUGIN_RECORDS_JSON", json.dumps(records or {WORKSPACE: [ENTRY, DRAFT]}))
 
 
-def fake_fc(monkeypatch: pytest.MonkeyPatch, *, version: str = "3.1.1", available: bool = True):
+def fake_fc(monkeypatch: pytest.MonkeyPatch, *, version: str = "3.2.0", available: bool = True, report: dict | None = None):
     seen: list[str] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -51,6 +99,9 @@ def fake_fc(monkeypatch: pytest.MonkeyPatch, *, version: str = "3.1.1", availabl
                 {"id": WORKSPACE, "displayName": "Synthetic Workspace", "status": "active"},
                 {"id": "other-workspace", "displayName": "Other", "status": "active"},
             ]})
+        if path == f"/api/v3/workspaces/{WORKSPACE}/reports/monthly-review":
+            assert request.url.params["month"] == "2025-03"
+            return httpx.Response(200, json={"workspaceId": WORKSPACE, "readOnly": True, "data": report})
         if path == f"/api/v3/workspaces/{WORKSPACE}/dashboard":
             return httpx.Response(200, json={"workspaceId": WORKSPACE, "data": {
                 "entryCount": 1, "draftCount": 1, "openLotCount": 0,
@@ -88,11 +139,11 @@ def test_archive_integrity_and_exact_contract():
         manifest = json.loads(package.read("manifest.json"))
         assert manifest == expected_manifest()
         assert manifest["protocolVersion"] == 2
-        assert manifest["version"] == "1.1.0"
-        assert manifest["minHostVersion"] == "1.8.0"
+        assert manifest["version"] == "1.2.0"
+        assert manifest["minHostVersion"] == "1.12.1"
         assert manifest["name"] == "Finance Core"
         assert manifest["capabilities"] == ["evidence.read"]
-        assert manifest["fcApiVersion"] == "3.1.1"
+        assert manifest["fcApiVersion"] == "3.2.0"
     assert "synthetic-read-token" not in (SOURCE / "ui.js").read_text(encoding="utf-8")
     assert "FINANCE_CORE_PLUGIN_READ_TOKEN" not in (SOURCE / "ui.js").read_text(encoding="utf-8")
 

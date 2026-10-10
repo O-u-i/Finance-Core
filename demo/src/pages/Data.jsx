@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
 import { id, localDate } from '../api.js';
-import { checkImportCSV, mapAccountingCSV, csvCommodityIssues } from '../csv.js';
+import { checkImportCSV, mapAccountingCSV, csvCommodityIssues, isSingleCurrencyCSV } from '../csv.js';
 import { Button, Field, Panel, ResourceForm, RejectDialog, Select, StepContent, Steps, Table, Tabs } from '../components.jsx';
 
 function Import({ fc }) {
   const [format, setFormat] = useState('csv'), [input, setInput] = useState(''), [checked, setChecked] = useState(null), [step, setStep] = useState(0);
   const [confirmed, setConfirmed] = useState(false), [result, setResult] = useState(null);
   const [profile, setProfile] = useState(null), [grouping, setGrouping] = useState(false), [accountMap, setAccountMap] = useState({});
+  const [sourceCurrency, setSourceCurrency] = useState('');
+  const [groupingRule, setGroupingRule] = useState('balanced'), [datePolicy, setDatePolicy] = useState('same-date');
   const [rejection, setRejection] = useState(null);
   const fileGeneration = React.useRef(0);
   React.useEffect(() => () => { fileGeneration.current++; }, []);
-  const change = (value) => { fileGeneration.current++; setInput(value); setProfile(null); setGrouping(false); setAccountMap({}); setChecked(null); setStep(0); setConfirmed(false); setResult(null); fc.markDirty(); };
-  const check = () => {
+  const change = (value) => { fileGeneration.current++; setInput(value); setProfile(null); setGrouping(false); setSourceCurrency(''); setAccountMap({}); setChecked(null); setStep(0); setConfirmed(false); setResult(null); fc.markDirty(); };
+  const check = async () => {
     try {
       if (format === 'json') {
         const payload = JSON.parse(input);
@@ -20,12 +22,19 @@ function Import({ fc }) {
         setChecked({ payload, count: payload.drafts.length });
       } else {
         const inspected = checkImportCSV(input);
-        const issues = csvCommodityIssues(inspected, fc.data.commodities || [], fc.data.accounts || []);
-        if (issues.length) throw Object.assign(new Error('CSV commodity configuration is invalid.'), { code: 'CSV_COMMODITY', reasons: issues });
         if (inspected.kind === 'accounting') {
           setProfile(inspected);
           if (!profile) setAccountMap(Object.fromEntries(inspected.codes.map((code) => [code, fc.data.accounts?.find((item) => item.code === code && item.status === 'active')?.id || ''])));
-          const payload = mapAccountingCSV(inspected.source, { groupingConfirmed: grouping, accountMap, accounts: fc.data.accounts || [], commodities: fc.data.commodities || [], prefix: id('csv') });
+        }
+        const issues = csvCommodityIssues(inspected, fc.data.commodities || [], fc.data.accounts || [], sourceCurrency);
+        if (issues.length && !(inspected.kind === 'accounting' && isSingleCurrencyCSV(inspected.source) && !sourceCurrency)) throw Object.assign(new Error('CSV commodity configuration is invalid.'), { code: 'CSV_COMMODITY', reasons: issues });
+        if (inspected.kind === 'accounting') {
+          let payload = mapAccountingCSV(inspected.source, { groupingConfirmed: grouping, accountMap, accounts: fc.data.accounts || [], commodities: fc.data.commodities || [], prefix: id('csv'), sourceCurrency, groupingRule });
+          if (groupingRule === 'balanced') {
+            const preview = await fc.run((api, wid) => api.ledger(wid, '/import/accounting-rows/validate', { method: 'POST', body: { rows: payload.rows, groupingConfirmed: true, datePolicy } }), 'Balanced-row preview validated; nothing imported.', { write: false, reload: false });
+            if (!preview) { setChecked(null); setStep(1); return; }
+            payload = { drafts: preview.drafts };
+          }
           setChecked({ payload, count: payload.drafts.length, mapped: true });
         } else setChecked({ payload: input, count: inspected.count });
       }
@@ -49,7 +58,7 @@ function Import({ fc }) {
       <Select label="Format" value={format} onChange={(value) => { setFormat(value); change(''); }} options={[{ value: 'json', label: 'JSON' }, { value: 'csv', label: 'CSV' }]}/>
       <Field label="Choose file"><input key={format} type="file" accept={format === 'json' ? '.json,application/json' : '.csv,text/csv'} onChange={async (e) => { const file = e.target.files[0], generation = ++fileGeneration.current; if (file) { fc.markDirty(); try { const content = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer()); if (generation === fileGeneration.current) change(content); } catch { if (generation === fileGeneration.current) fc.setNotice({ error: true, text: 'Cannot read this file. Use a valid UTF-8 file.' }); } } }}/></Field>
       <Field label={format === 'json' ? 'JSON drafts' : 'CSV input'}><textarea rows={9} value={input} onChange={(e) => change(e.target.value)} placeholder={format === 'json' ? '{"drafts": [...]}' : 'entryId,postingId,accountId,side,units,…'}/></Field>
-      {profile && <div className="csv-mapping"><h3>Accounting journal mapping</h3><p>Parent references are kept as posting memos. Confirm grouping by row order: each row without a parent begins a draft, followed by its child rows. Mixed-currency drafts require explicit rates in the standard FC format.</p><label><input type="checkbox" checked={grouping} onChange={(e) => { setGrouping(e.target.checked); fc.markDirty(); }}/> Use this parent / child grouping rule.</label><div className="form-grid">{profile.codes.map((code) => <Select key={code} label={`Source account ${code}`} value={accountMap[code] || ''} options={[{ value: '', label: 'Choose an account' }, ...(fc.data.accounts || []).filter((item) => item.status === 'active').map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))]} onChange={(value) => { setAccountMap({ ...accountMap, [code]: value }); fc.markDirty(); }}/>)}</div></div>}
+      {profile && <div className="csv-mapping"><h3>Accounting journal mapping</h3><p>Choose and confirm a row grouping rule. FC validates balanced grouping; parent and reference captions do not determine its boundaries. Source context stays in posting memos. Mixed-currency drafts require explicit rates in the standard FC format.</p>{isSingleCurrencyCSV(profile.source) && <Select label="Source currency (not inferred)" value={sourceCurrency} options={[{ value: '', label: 'Choose a currency' }, ...(fc.data.commodities || []).filter(item => item.kind === 'currency' && item.status === 'active').map(item => ({ value: item.code, label: item.code }))]} onChange={value => { setSourceCurrency(value); fc.markDirty(); }}/>}<label><input type="checkbox" checked={grouping} onChange={(e) => { setGrouping(e.target.checked); fc.markDirty(); }}/> Use this explicit row grouping rule.</label>{<Select label="Row grouping" value={groupingRule} options={[{ value: 'balanced', label: 'FC: consecutive rows until debit equals credit' }, ...(!isSingleCurrencyCSV(profile.source) ? [{ value: 'parent', label: 'A row without a parent begins a draft' }] : []), { value: 'description', label: 'A non-empty description starts a draft' }, { value: 'date', label: 'Consecutive rows with the same date and reference' }, { value: 'same-key', label: 'Consecutive rows with the same date, reference and description' }]} onChange={value => { setGroupingRule(value); setGrouping(false); fc.markDirty(); }}/>} {groupingRule === 'balanced' && <Select label="Date policy" value={datePolicy} options={[{ value: 'same-date', label: 'Require the same date throughout a group' }, { value: 'first-row', label: 'Use first row date; retain source dates in memos' }]} onChange={value => { setDatePolicy(value); setGrouping(false); fc.markDirty(); }}/>}<div className="form-grid">{profile.codes.map((code) => <Select key={code} label={`Source account ${code}`} value={accountMap[code] || ''} options={[{ value: '', label: 'Choose an account' }, ...(fc.data.accounts || []).filter((item) => item.status === 'active').map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))]} onChange={(value) => { setAccountMap({ ...accountMap, [code]: value }); fc.markDirty(); }}/>)}</div></div>}
       <Button onClick={check} disabled={!input.trim()}>Check structure</Button>
       </div>
       {step === 2 && <Button onClick={() => { setStep(0); setChecked(null); setConfirmed(false); }}>Edit input</Button>}
