@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createClient, createCoordinator } from './api.js';
+import { createClient, createCoordinator, readLedgerPaths } from './api.js';
 
 const client = createClient();
 export { views, parseRoute } from './navigation.js';
-import { viewPaths, parseRoute, assessSetup } from './navigation.js';
+import { viewPaths, parseRoute, assessSetup, routeHash } from './navigation.js';
 
 export function useFinance() {
   const gate = useRef(createCoordinator()).current;
@@ -52,11 +52,16 @@ export function useFinance() {
     if (!selected) return;
     const ticket = gate.read(); setLoading(true);
     try {
-      const paths = { commodities: '/commodities', accounts: '/accounts', ...viewPaths(view, nextRoute?.tab ?? routeRef.current.tab) };
-      const result = Object.fromEntries(await Promise.all(Object.entries(paths).map(async ([key, path]) => {
-        const payload = await client.ledger(selected.id, path, { signal: ticket.signal });
-        return [key, Object.hasOwn(payload, 'data') ? payload.data : payload];
-      })));
+      const target = nextRoute || routeRef.current;
+      const paths = { ledgerHealth: '/health', commodities: '/commodities', accounts: '/accounts', ...viewPaths(view, target.tab, new Date(), target.segment, target.month) };
+      const result = await readLedgerPaths(client, selected.id, paths, ticket.signal);
+      if (result.migrationRequired && view === 'overview') {
+        Object.assign(result, await readLedgerPaths(client, selected.id, { legacyDashboard: '/dashboard', world: '/world' }, ticket.signal));
+      }
+      if(result.migrationRequired && view === 'monthlyreview') {
+        const legacy = viewPaths('legacyreview', target.tab, new Date(), target.segment, target.month);
+        result.monthlyReview = (await client.ledger(selected.id,legacy.monthlyReview,{signal:ticket.signal})).data;
+      }
       if (view === 'settings') {
         const [workspaceResult, tokenResult] = await Promise.all([
           client.request('/api/v3/workspaces', { signal: ticket.signal }), client.request('/api/v3/access-tokens', { signal: ticket.signal }),
@@ -65,11 +70,16 @@ export function useFinance() {
       }
       if (ticket.current() && selected.id === workspaceRef.current?.id && (nextRoute || view === routeRef.current.view)) {
         setData(result);
-        setSetupRecords({ loaded: true, commodities: result.commodities, accounts: result.accounts });
-        if (nextRoute) { dirty.current.clear(); routeRef.current = nextRoute; setRoute(nextRoute); window.scrollTo({ top: 0, behavior: 'instant' }); }
+        setSetupRecords(previous => ({ loaded: true, commodities: result.commodities, accounts: result.accounts, financialAccounts: Object.hasOwn(result,'financialAccounts') ? result.financialAccounts : previous.financialAccounts,
+          migrationRequired: Object.hasOwn(result,'migrationRequired') ? result.migrationRequired : previous.migrationRequired }));
+        if (nextRoute) {
+          const changedPage = nextRoute.view !== routeRef.current.view;
+          dirty.current.clear(); routeRef.current = nextRoute; setRoute(nextRoute);
+          if (changedPage) window.scrollTo({ top: 0, behavior: 'instant' });
+        }
         if (result.workspaces) setWorkspaces(result.workspaces);
       }
-    } catch (error) { if (ticket.current()) { fail(error); if (nextRoute) history.replaceState(null, '', `#/${routeRef.current.view}${routeRef.current.tab ? '/' + routeRef.current.tab : ''}`); } }
+    } catch (error) { if (ticket.current()) { fail(error); if (nextRoute) history.replaceState(null, '', routeHash(routeRef.current)); } }
     finally { if (ticket.current()) setLoading(false); }
   }, [gate, fail]);
   // Page navigation loads and commits the target atomically; this effect handles Workspace/session changes only.
@@ -78,12 +88,12 @@ export function useFinance() {
   const canLeave = useCallback(() => !gate.writing && (!dirty.current.size || confirm('Discard unsaved changes?')), [gate]);
   const transition = useCallback((next) => {
     setOneTimeToken(''); setNotice(null);
-    if (next.view !== routeRef.current.view || (next.view === 'monthlyreview' && next.tab !== routeRef.current.tab)) refresh(workspaceRef.current, next.view, next);
+    if (next.view !== routeRef.current.view || next.segment !== routeRef.current.segment || next.month !== routeRef.current.month || (['master','balances','assets','monthlyreview','livingreview','legacyreview'].includes(next.view) && next.tab !== routeRef.current.tab)) refresh(workspaceRef.current, next.view, next);
     else { gate.invalidate(); setLoading(false); dirty.current.clear(); routeRef.current = next; setRoute(next); }
   }, [gate, refresh]);
   useEffect(() => {
     const changed = () => {
-      if (!canLeave()) { history.replaceState(null, '', `#/${routeRef.current.view}${routeRef.current.tab ? '/' + routeRef.current.tab : ''}`); return; }
+      if (!canLeave()) { history.replaceState(null, '', routeHash(routeRef.current)); return; }
       transition(parseRoute());
     };
     const beforeUnload = (event) => { if (dirty.current.size || gate.writing) { event.preventDefault(); event.returnValue = ''; } };
@@ -91,11 +101,12 @@ export function useFinance() {
     return () => { window.removeEventListener('hashchange', changed); window.removeEventListener('beforeunload', beforeUnload); };
   }, [canLeave, gate, transition]);
 
-  const navigate = (view, tab = '') => {
-    const hash = `#/${view}${tab ? '/' + tab : ''}`;
+  const navigate = (view, tab = '', segment = routeRef.current.segment || 'investment', month = '') => {
+    const next = { view, tab, segment, ...(month ? { month } : {}) };
+    const hash = routeHash(next);
     if (location.hash === hash) return;
     if (!canLeave()) return;
-    history.pushState(null, '', hash); transition({ view, tab });
+    history.pushState(null, '', hash); transition(next);
   };
   const switchWorkspace = (wid) => {
     if (!canLeave()) return;
@@ -133,5 +144,5 @@ export function useFinance() {
   return { route, session, health, actor, setup, sessionOrigin, workspaces, workspace, data, notice, loading, busy, controlUndo, oneTimeToken,
     setOneTimeToken, setControlUndo, setNotice, setWorkspace, setWorkspaces, setSession, bootstrap, refresh, navigate, switchWorkspace,
     run, ledger, signOut, canLeave, discardChanges: () => dirty.current.clear(), markDirty: (scope = 'page') => { dirty.current.add(scope); }, clean: (scope = 'page') => { dirty.current.delete(scope); },
-    readonly: workspace?.status === 'archived', client };
+    readonly: workspace?.status === 'archived', migrationRequired: setupRecords.migrationRequired, client };
 }

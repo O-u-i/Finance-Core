@@ -10,7 +10,7 @@ from functools import wraps
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from pydantic import ValidationError
 
 from finance_core.contracts_v3 import (
@@ -59,6 +59,7 @@ from finance_core.contracts_v3 import (
 )
 from finance_core.ledger_repository import LedgerRepository, dump
 from finance_core.accounting_csv import AccountingRowsRequest, balanced_drafts
+from finance_core.schema_migration import schema_version
 from finance_core.models import UndoRequest
 from finance_core.models_v2 import (
     Account,
@@ -118,6 +119,7 @@ class LedgerContractRouter(APIRouter):
             ("/accounts", "GET"): AccountListResponse,
             ("/accounts", "POST"): AccountMutationResponse,
             ("/accounts/{account_id}", "PUT"): AccountMutationResponse,
+            ("/accounts/{account_id}", "DELETE"): AccountMutationResponse,
             ("/price-quotes", "GET"): PriceQuoteListResponse,
             ("/price-quotes", "POST"): PriceQuoteMutationResponse,
             ("/price-quotes/{quote_id}", "DELETE"): PriceQuoteDeleteResponse,
@@ -216,7 +218,7 @@ def create_v2_router(
             "service": "finance-core",
             "serviceVersion": service_version,
             "apiVersion": api_version,
-            "ledgerSchemaVersion": 2,
+            "ledgerSchemaVersion": schema_version(database),
             "registrySchemaVersion": 1 if api_version.startswith("3.") else None,
             "supportedApiVersions": [api_version],
             "capabilities": [
@@ -294,6 +296,13 @@ def create_v2_router(
         except Exception as error:
             raise translate(error) from error
 
+    @router.delete("/accounts/{account_id}")
+    def delete_account(account_id: str, request: Request) -> dict[str, Any]:
+        try:
+            return {"data": repo(request).delete_account(account_id, ledger_only=True)}
+        except Exception as error:
+            raise translate(error) from error
+
     @router.get("/price-quotes")
     def list_price_quotes(request: Request) -> dict[str, Any]:
         return {"data": [dump(item) for item in repo(request).list_price_quotes()]}
@@ -332,8 +341,11 @@ def create_v2_router(
             raise translate(error) from error
 
     @router.delete("/living-accounts/{account_id}")
-    def delete_living_account(account_id: str, request: Request) -> dict[str, Any]:
-        result = repo(request).delete_living_account(account_id)
+    def delete_living_account(account_id: str, request: Request, preserve_history: bool = Query(False, alias='preserveHistory', description='Refuse deletion when snapshots or a nonzero recorded balance exist; original undoable delete remains the default.')) -> dict[str, Any]:
+        try:
+            result = repo(request).delete_living_account(account_id, preserve_history=preserve_history)
+        except Exception as error:
+            raise translate(error) from error
         if result is None:
             raise HTTPException(404, detail={
                 "code": "RESOURCE_NOT_FOUND", "message": "Living account was not found."

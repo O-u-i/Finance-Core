@@ -32,6 +32,6 @@ def test_legacy_extract_excludes_context_and_reports(tmp_path):
     assert audit["automaticallyWrittenToV2"] == 0
     assert audit["requiresHumanCompletion"] == 1
     target = connect(tmp_path / "core.sqlite3")
-    assert [row[0] for row in target.execute("SELECT version FROM schema_migrations ORDER BY version")] == [1, 2]
+    assert [row[0] for row in target.execute("SELECT version FROM schema_migrations ORDER BY version")] == [1, 2, 3]
     FinanceRepository(target).replace_bundle(bundle.model_dump(by_alias=True))
     assert FinanceRepository(target).export_bundle()["holdings"][0]["id"] == "h1"

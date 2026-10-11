@@ -88,7 +88,7 @@ def test_openapi_names_responses_and_declares_security_scopes_and_errors(tmp_pat
     api = authenticated_client(tmp_path)
     try:
         schema = api.get("/openapi.json").json()
-        assert schema["info"]["version"] == "3.2.0"
+        assert schema["info"]["version"] == "3.3.0"
         schemes = schema["components"]["securitySchemes"]
         assert schemes["BearerAccessToken"]["scheme"] == "bearer"
         assert schemes["SessionCookie"] == {
@@ -107,15 +107,21 @@ def test_openapi_names_responses_and_declares_security_scopes_and_errors(tmp_pat
         assert ledger_paths
         for path, path_item in ledger_paths.items():
             for method, operation in path_item.items():
-                assert operation["security"] == [
-                    {"BearerAccessToken": []}, {"SessionCookie": []},
-                ]
                 expected_scope = "ledger:read" if method == "get" or path.endswith("/validate") else "ledger:write"
-                assert operation["x-fc-required-scope"] == expected_scope, (path, operation["operationId"])
+                if operation.get('x-fc-required-actor') == 'owner-session':
+                    assert operation['security'] == [{'SessionCookie':[]}]
+                    assert 'x-fc-required-scope' not in operation
+                else:
+                    assert operation["security"] == [{"BearerAccessToken": []}, {"SessionCookie": []}]
+                    assert operation["x-fc-required-scope"] == expected_scope, (path, operation["operationId"])
                 assert {"401", "403", "404", "409", "410", "422"}.issubset(operation["responses"])
                 success = operation["responses"].get("200") or operation["responses"].get("201")
                 media = next(iter(success["content"].values()))
-                assert media["schema"]["$ref"].startswith("#/components/schemas/")
+                if path.endswith('.csv') and operation.get('x-fc-required-actor') == 'owner-session':
+                    assert 'text/csv' in success['content']
+                    assert success['content']['text/csv']['schema']['type']=='string'
+                else:
+                    assert media["schema"]["$ref"].startswith("#/components/schemas/")
         holding_schema = schema["components"]["schemas"]["Holding"]["properties"]
         for decimal_field in (
             "originalUnits", "remainingUnits", "originalCost", "remainingCost",
@@ -146,8 +152,8 @@ def test_health_exposes_only_commit_shaped_release_metadata(tmp_path: Path):
         health = api.get("/api/v3/health").json()
         assert health["buildCommit"] == "a" * 40
         assert health["releaseCommit"] == "b" * 40
-        assert health["serviceVersion"] == "3.3.0"
-        assert health["apiVersion"] == "3.2.0"
+        assert health["serviceVersion"] == "3.4.0"
+        assert health["apiVersion"] == "3.3.0"
 
 
 def test_single_holding_is_scoped_and_hidden_across_workspaces(tmp_path: Path):

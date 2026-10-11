@@ -30,8 +30,8 @@ def test_health_declares_versioned_contract(tmp_path: Path):
     with client(tmp_path) as api:
         response = api.get("/api/v3/health")
         assert response.status_code == 200
-        assert response.json()["apiVersion"] == "3.2.0"
-        assert response.json()["ledgerSchemaVersion"] == 2
+        assert response.json()["apiVersion"] == "3.3.0"
+        assert response.json()["ledgerSchemaVersion"] == 3
         assert response.json()["registrySchemaVersion"] == 1
         assert api.get("/api/v1/health").status_code == 404
         assert api.get("/api/v2/health").status_code == 404

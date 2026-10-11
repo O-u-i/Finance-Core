@@ -1,10 +1,20 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { selectedMonth } from './navigation.js';
+export const options = values => values.map(value => ({ value, label: value }));
 
 export function Logo({ small = false }) {
   return <span className="brand"><img src="/branding/logo.svg" width={small ? 119 : 162} height={small ? 30 : 40} alt="FINCR"/><span>Finance Core<small>Local finance, clearly.</small></span></span>;
 }
 export function Button({ children, primary, danger, ...props }) { return <button className={`${primary ? 'primary' : ''} ${danger ? 'danger' : ''}`} {...props}>{children}</button>; }
+export function MonthPicker({ fc }) {
+  return <Field label="As-of month (balances are month-end observations)"><input type="month" value={selectedMonth(fc.route)} disabled={fc.busy} onChange={event => {
+    const month = event.target.value;
+    if (!month) return;
+    const globalView = ['overview', 'master'].includes(fc.route.view);
+    fc.navigate(fc.route.view, globalView ? fc.route.tab : month, fc.route.segment, globalView ? month : '');
+  }}/></Field>;
+}
 export function RejectDialog({ reasons, onClose }) {
   const dialog = useRef(null), title = useId(), description = useId();
   useEffect(() => {
@@ -35,7 +45,7 @@ export function ResourceForm({ fc, fields, initial = {}, immutable = [], submitL
     const values = Object.fromEntries(new FormData(form));
     if (await onSave(values)) { form.reset(); fc.clean(form); }
   }}><fieldset disabled={fc.busy || fc.readonly}><div className="form-grid">{fields.map(([name, label, type = 'text', options]) => <Field key={name} label={label}>
-    {options ? <select name={name} defaultValue={initial[name] ?? options[0]?.value}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : <input name={name} type={type} defaultValue={initial[name] ?? ''} readOnly={immutable.includes(name)} required={!['note', 'subtype', 'payee', 'reference'].includes(name)} inputMode={['amount', 'balance', 'price'].includes(name) ? 'decimal' : undefined}/>}
+    {options ? <select name={name} defaultValue={initial[name] ?? options[0]?.value}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : <input name={name} type={type} defaultValue={initial[name] ?? ''} readOnly={immutable.includes(name)} required={!['note', 'subtype', 'payee', 'reference', 'linkedAccountId', 'startMonth', 'endMonth', 'successorOf', 'legacyLivingId'].includes(name)} inputMode={['amount', 'balance', 'price', 'purchaseCost', 'ownershipShare'].includes(name) ? 'decimal' : undefined}/>}
   </Field>)}</div><Button type="submit" primary>{submitLabel}</Button></fieldset></form>;
 }
 export function Table({ columns, rows = [], rowKey, caption }) {

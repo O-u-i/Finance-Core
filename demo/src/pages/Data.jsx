@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { id, localDate } from '../api.js';
+import { SegmentExport } from './SegmentData.jsx';
+import { downloadPrivate, id, localDate } from '../api.js';
 import { checkImportCSV, mapAccountingCSV, csvCommodityIssues, isSingleCurrencyCSV } from '../csv.js';
 import { Button, Field, Panel, ResourceForm, RejectDialog, Select, StepContent, Steps, Table, Tabs } from '../components.jsx';
 
@@ -71,22 +72,14 @@ function Import({ fc }) {
   </Panel>;
 }
 
-export function Backup({ fc, restoreOnly = false }) {
+export function Backup({ fc }) {
   const [backup, setBackup] = useState(null), [name, setName] = useState('');
-  const download = (path, filename, csv = false) => fc.run(async (api, wid) => {
-    const payload = await api.ledger(wid, path);
-    const content = csv ? '\ufeff' + payload.replace(/^\ufeff/, '') : JSON.stringify(payload, null, 2);
-    const url = URL.createObjectURL(new Blob([content], { type: csv ? 'text/csv;charset=utf-8' : 'application/json' }));
-    const link = document.createElement('a'); link.href = url; link.download = filename;
-    document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-    return { downloaded: true };
-  }, 'Export downloaded.', { write: false, reload: false });
-  return <>{!restoreOnly && <Panel title="Export & backup" description="Exports are private. Store downloaded files safely and outside Git."><p>Postings CSV includes posted entries only. Unposted imported drafts are included in JSON exports and backups.</p><div className="actions"><Button disabled={fc.busy} onClick={() => download('/export', 'finance-core-export.json')}>Download JSON export</Button><Button disabled={fc.busy} onClick={() => download('/export/journal-entries.csv', 'journal-entries-v3.csv', true)}>Download postings CSV</Button><Button primary disabled={fc.busy} onClick={() => download('/backup', 'finance-core-backup.json')}>Download SHA-256 backup</Button></div></Panel>}
-    <Panel title="Restore an empty ledger" description="Restore checks the backup format, schema, hash and foreign keys. Undo is available afterward."><fieldset disabled={fc.busy || fc.readonly}><Field label="JSON backup"><input type="file" accept=".json,application/json" onChange={async (event) => { try { const file = event.target.files[0]; if (!file) return; const payload = JSON.parse(await file.text()); setBackup(payload.data || payload); setName(file.name); fc.markDirty(); } catch { setBackup(null); fc.setNotice({ error: true, text: 'Select a valid JSON backup.' }); } }}/></Field>{backup && <p>Selected: {name}</p>}<Button primary disabled={!backup} onClick={async () => { if (!confirm('Restore this backup into the empty ledger?')) return; if (await fc.ledger('/backup/restore', { method: 'POST', body: backup }, 'Backup validated and restored.')) { fc.clean(); setBackup(null); setName(''); } }}>Validate and restore</Button></fieldset></Panel></>;
+  return <><Panel title="Export & backup" description="Exports are private. Store downloaded files safely and outside Git."><p>Postings CSV includes posted entries only. Unposted imported drafts are included in JSON exports and backups.</p><div className="actions"><Button disabled={fc.busy} onClick={() => downloadPrivate(fc, '/export', 'finance-core-export.json')}>Download JSON export</Button><Button disabled={fc.busy} onClick={() => downloadPrivate(fc, '/export/journal-entries.csv', 'journal-entries-v3.csv', true)}>Download postings CSV</Button><Button primary disabled={fc.busy} onClick={() => downloadPrivate(fc, fc.migrationRequired ? '/backup' : '/vault-backup', fc.migrationRequired ? 'finance-core-legacy-backup-v2.json' : 'finance-core-vault-backup-v3.json')}>{fc.migrationRequired ? 'Download legacy backup (format 2)' : 'Download unified Vault backup (format 3)'}</Button></div></Panel>
+    <Panel title="Restore an empty ledger" description="Restore checks the backup format, schema, hash and foreign keys. Format 3 retains immutable histories and has no ordinary undo. Restore only into a new empty Vault. Format 2 is legacy."><fieldset disabled={fc.busy || fc.readonly}><Field label="JSON backup"><input type="file" accept=".json,application/json" onChange={async (event) => { try { const file = event.target.files[0]; if (!file) return; const payload = JSON.parse(await file.text()); setBackup(payload.data || payload); setName(file.name); fc.markDirty(); } catch { setBackup(null); fc.setNotice({ error: true, text: 'Select a valid JSON backup.' }); } }}/></Field>{backup && <p>Selected: {name}</p>}<Button primary disabled={!backup} onClick={async () => { if (!confirm('Restore this backup into the empty ledger?')) return; if (await fc.ledger(fc.migrationRequired ? '/backup/restore' : '/vault-backup/restore', { method: 'POST', body: backup }, 'Backup validated and restored.')) { fc.clean(); setBackup(null); setName(''); } }}>Validate and restore</Button></fieldset></Panel></>;
 }
 
 export default function Data({ fc }) {
-  const items = [['import', 'Import'], ['backup', 'Export & backup'], ['recurring', 'Recurring drafts'], ['batch', 'Atomic batch']];
+  const items = [['import', 'Import'], ['backup', 'Segment export'], ['recurring', 'Recurring drafts'], ['batch', 'Atomic batch']];
   const tab = items.some(([key]) => key === fc.route.tab) ? fc.route.tab : 'import';
   const drafts = (fc.data.drafts || []).map(({ draft }) => ({ value: draft.id, label: draft.description }));
   const [batch, setBatch] = useState('');
@@ -105,6 +98,6 @@ export default function Data({ fc }) {
     </Panel>}
     {tab === 'import' && <Import fc={fc}/>}
     {tab === 'batch' && <Panel title="Atomic mutable batch" description="Only commodities, accounts, price quotes and drafts. Posting and reversal remain separate operations."><fieldset disabled={fc.busy || fc.readonly}><Field label="Batch JSON"><textarea rows={10} value={batch} onChange={(e) => { setBatch(e.target.value); fc.markDirty(); }} placeholder='{"commodities":[],"accounts":[],"drafts":[]}'/></Field><Button primary disabled={!batch.trim()} onClick={async () => { try { const body = JSON.parse(batch); if (confirm('Validate and execute this mutable batch atomically?')) { if (await fc.ledger('/batch', { method: 'POST', body }, 'Mutable batch completed atomically.')) { fc.clean(); setBatch(''); } } } catch { fc.setNotice({ error: true, text: 'Batch must be valid JSON.' }); } }}>Validate and execute</Button></fieldset></Panel>}
-    {tab === 'backup' && <Backup fc={fc}/>}
+    {tab === 'backup' && <SegmentExport fc={fc} segment="investment"/>}
   </>;
 }

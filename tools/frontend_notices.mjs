@@ -9,7 +9,8 @@ const sections = Object.entries(packages).map(([name, version]) => {
 });
 const notice = `Finance Core frontend third-party notices\n\n${sections.join('\n---\n\n')}`;
 if (process.argv.includes('--check')) {
-  const root = 'dist/v3.2.0';
+  const version = JSON.parse(readFileSync('package.json', 'utf8')).version;
+  const root = `dist/v${version}`;
   if (readFileSync(join(root, 'THIRD-PARTY-NOTICES.txt'), 'utf8') !== notice) throw new Error('Distribution notices are missing or stale.');
   const inspect = (dir) => {
     for (const item of readdirSync(dir, { withFileTypes: true })) {

@@ -1,20 +1,20 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import sqlite3
 from calendar import monthrange
-from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
 from finance_core.database import transaction
+from finance_core import ledger_backup, ledger_reports
+from finance_core.personal_finance_snapshot import PersonalFinanceSnapshot
 from finance_core.monthly_review import monthly_review, month_window
 from finance_core.ledger import (
     complete_entry, decimal_add, decimal_mul, decimal_sub, decimal_sum,
-    normal_balance, quantize, quantize_ratio,
+    quantize, quantize_ratio,
 )
 from finance_core.models_v2 import (
     Account,
@@ -92,6 +92,38 @@ class LedgerRepository:
         return self._account_from_row(row) if row else None
 
     def save_account(self, item: Account, *, create: bool) -> Account:
+        before = self._mutable_snapshot()
+        with transaction(self.connection):
+            self._save_account_row(item, create=create)
+            # Old callers keep their contract; the unified registry is the same writer.
+            if self.connection.execute("SELECT 1 FROM sqlite_master WHERE name='financial_accounts_v3'").fetchone():
+                from finance_core.schema_migration import register_ledger_accounts
+                register_ledger_accounts(self.connection, confirmed=True)
+            self._save_undo(before)
+        return item
+
+    def delete_account(self, account_id: str, *, ledger_only: bool = False) -> dict:
+        """Delete an unused identity under the same writer reservation as its reference check."""
+        with transaction(self.connection):
+            ledger_account = self.get_account(account_id)
+            if ledger_only and ledger_account is None:
+                raise LookupError('Ledger account was not found.')
+            snapshot = PersonalFinanceSnapshot(self.connection)
+            unified = self.connection.execute("SELECT 1 FROM sqlite_master WHERE name='financial_accounts_v3'").fetchone()
+            accounts = snapshot.accounts() if unified else [dump(item) for item in self.list_accounts()]
+            account = next((item for item in accounts if item['id'] == account_id), None)
+            if account is None:
+                raise LookupError('Account was not found.')
+            if snapshot.account_is_referenced(account_id):
+                raise ValueError('Account has history or references. End its purpose instead of deleting it.')
+            if unified:
+                self.connection.execute('DELETE FROM financial_accounts_v3 WHERE id=?', (account_id,))
+            self.connection.execute('DELETE FROM accounts_v2 WHERE id=?', (account_id,))
+            self._invalidate_undo()
+        return dump(ledger_account) if ledger_only else account
+
+    def _save_account_row(self, item: Account, *, create: bool) -> None:
+        """Shared transactional write primitive for old and unified registration."""
         for code in item.allowed_commodity_codes:
             if self.get_commodity(code) is None:
                 raise ValueError("Account references an unknown commodity.")
@@ -103,22 +135,23 @@ class LedgerRepository:
             json.dumps(item.allowed_commodity_codes, ensure_ascii=False, separators=(",", ":")),
             item.status,
         )
-        before = self._mutable_snapshot()
-        with transaction(self.connection):
-            if create:
-                self.connection.execute(
-                    "INSERT INTO accounts_v2(id,code,name,type,subtype,allowed_commodities_json,status) VALUES (?,?,?,?,?,?,?)",
-                    (item.id, *values),
-                )
-            else:
-                result = self.connection.execute(
-                    "UPDATE accounts_v2 SET code=?,name=?,type=?,subtype=?,allowed_commodities_json=?,status=? WHERE id=?",
-                    (*values, item.id),
-                )
-                if result.rowcount == 0:
-                    raise LookupError("Account was not found.")
-            self._save_undo(before)
-        return item
+        if create:
+            self.connection.execute(
+                "INSERT INTO accounts_v2(id,code,name,type,subtype,allowed_commodities_json,status) VALUES (?,?,?,?,?,?,?)",
+                (item.id, *values),
+            )
+        else:
+            result = self.connection.execute(
+                "UPDATE accounts_v2 SET code=?,name=?,type=?,subtype=?,allowed_commodities_json=?,status=? WHERE id=?",
+                (*values, item.id),
+            )
+            if result.rowcount == 0:
+                raise LookupError("Account was not found.")
+        if self.connection.execute("SELECT 1 FROM sqlite_master WHERE name='financial_accounts_v3'").fetchone():
+            row = self.connection.execute('SELECT payload_json FROM financial_accounts_v3 WHERE ledger_account_id=?',(item.id,)).fetchone()
+            if row:
+                payload = {**json.loads(row['payload_json']),**dump(item)}
+                self.connection.execute('UPDATE financial_accounts_v3 SET payload_json=? WHERE id=?',(json.dumps(payload,ensure_ascii=False,separators=(',',':')),item.id))
 
     def list_price_quotes(self) -> list[PriceQuote]:
         rows = self.connection.execute("SELECT * FROM price_quotes_v2 ORDER BY as_of DESC, id").fetchall()
@@ -150,11 +183,7 @@ class LedgerRepository:
             return deleted
 
     def list_living_accounts(self) -> list[LivingAccountV2]:
-        rows = self.connection.execute("SELECT * FROM living_accounts_v2 ORDER BY name,id").fetchall()
-        return [LivingAccountV2.model_validate({
-            "id": row["id"], "name": row["name"], "commodityCode": row["commodity_code"],
-            "balance": row["balance"], "note": row["note"], "updatedAt": row["updated_at"],
-        }) for row in rows]
+        return PersonalFinanceSnapshot(self.connection).legacy_accounts()
 
     def save_living_account(self, item: LivingAccountV2, *, create: bool) -> LivingAccountV2:
         self._require_scale(item.balance, item.commodity_code, "balance")
@@ -208,15 +237,17 @@ class LedgerRepository:
             self._save_undo(before)
         return updated, snapshot
 
-    def delete_living_account(self, account_id: str) -> tuple[LivingAccountV2, int, dict[str, str]] | None:
-        account = next((item for item in self.list_living_accounts() if item.id == account_id), None)
-        if account is None:
-            return None
-        before = self._mutable_snapshot()
+    def delete_living_account(self, account_id: str, *, preserve_history: bool = False) -> tuple[LivingAccountV2, int, dict[str, str]] | None:
         with transaction(self.connection):
+            account = next((item for item in self.list_living_accounts() if item.id == account_id), None)
+            if account is None:
+                return None
             snapshot_count = self.connection.execute(
                 "SELECT COUNT(*) FROM living_snapshots_v2 WHERE account_id=?", (account_id,)
             ).fetchone()[0]
+            if preserve_history and (snapshot_count or Decimal(account.balance) != 0):
+                raise ValueError('Living account has snapshot history or a nonzero recorded balance and cannot be deleted. Retain or explicitly migrate it.')
+            before = self._mutable_snapshot()
             self.connection.execute("DELETE FROM living_snapshots_v2 WHERE account_id=?", (account_id,))
             self.connection.execute("DELETE FROM living_accounts_v2 WHERE id=?", (account_id,))
             undo = self._save_undo(before)
@@ -320,6 +351,12 @@ class LedgerRepository:
         commodities = {item.code: item for item in self.list_commodities()}
         accounts = {item.id: item for item in self.list_accounts()}
         completed, issues = complete_entry(draft, commodities, accounts)
+        if self.connection.execute("SELECT 1 FROM sqlite_master WHERE name='arrangement_drafts_v3'").fetchone():
+            try:
+                PersonalFinanceSnapshot(self.connection).validate_generated_draft(draft)
+            except ValueError as error:
+                issues.append(ValidationIssue(code='ENTITLEMENT_DRAFT_STALE', severity='error', path='id', message=str(error)))
+                return None, issues
         if completed is not None:
             issues.extend(self._validate_lot_allocations(completed))
             if issues:
@@ -327,15 +364,17 @@ class LedgerRepository:
         return completed, issues
 
     def post_draft(self, draft_id: str) -> dict[str, Any]:
-        stored = self.get_draft(draft_id)
-        if stored is None or stored["status"] != "draft":
-            raise LookupError("Draft was not found or is already posted.")
-        draft = JournalEntryDraft.model_validate(stored["draft"])
-        completed, issues = self.validate_draft(draft)
-        if completed is None:
-            return {"posted": False, "issues": [dump(item) for item in issues]}
-        timestamp = now_iso()
         with transaction(self.connection):
+            # Reserve the writer before reading/validating the draft and entitlement
+            # revision. Validation and posting must see the same finance facts.
+            stored = self.get_draft(draft_id)
+            if stored is None or stored["status"] != "draft":
+                raise LookupError("Draft was not found or is already posted.")
+            draft = JournalEntryDraft.model_validate(stored["draft"])
+            completed, issues = self.validate_draft(draft)
+            if completed is None:
+                return {"posted": False, "issues": [dump(item) for item in issues]}
+            timestamp = now_iso()
             if self.connection.execute("SELECT 1 FROM journal_entries_v2 WHERE id=?", (completed.id,)).fetchone():
                 raise ValueError("Entry id already exists.")
             self._insert_completed(completed, timestamp=timestamp, reversal_of=None)
@@ -559,6 +598,9 @@ class LedgerRepository:
                     "INSERT INTO journal_drafts_v2(id,payload_json,status,created_at,updated_at) VALUES (?,?,?,?,?)",
                     (item.id, json.dumps(dump(item), ensure_ascii=False, separators=(",", ":")), "draft", timestamp, timestamp),
                 )
+            if self.connection.execute("SELECT 1 FROM sqlite_master WHERE name='financial_accounts_v3'").fetchone():
+                from finance_core.schema_migration import register_ledger_accounts
+                register_ledger_accounts(self.connection, confirmed=True)
             self._save_undo(before)
         return {
             "commodities": len(batch.commodities),
@@ -587,220 +629,20 @@ class LedgerRepository:
             self.connection.execute("RELEASE monthly_review_read")
 
     def account_flows(self) -> list[dict[str, Any]]:
-        accounts = {item.id: item for item in self.list_accounts()}
-        groups: dict[tuple[str, str], dict[str, Decimal | int]] = defaultdict(
-            lambda: {"debit": Decimal(0), "credit": Decimal(0), "count": 0}
-        )
-        rows = self.connection.execute("SELECT account_id,commodity_code,side,units FROM postings_v2").fetchall()
-        for row in rows:
-            group = groups[(row["account_id"], row["commodity_code"])]
-            group[row["side"]] = decimal_add(group[row["side"]], Decimal(row["units"]))
-            group["count"] += 1
-        output = []
-        for (account_id, commodity), values in sorted(groups.items()):
-            account = accounts[account_id]
-            debit, credit = values["debit"], values["credit"]
-            output.append({
-                "accountId": account_id,
-                "accountCode": account.code,
-                "accountName": account.name,
-                "accountType": account.type,
-                "commodityCode": commodity,
-                "debit": canonical_decimal(debit),
-                "credit": canonical_decimal(credit),
-                "balance": canonical_decimal(normal_balance(account.type, debit, credit)),
-                "count": values["count"],
-            })
-        return output
-
+        return ledger_reports.account_flows(self)
     def holdings(self) -> list[dict[str, Any]]:
-        rows = self.connection.execute(
-            "SELECT * FROM lots_v2 ORDER BY commodity_code,acquired_date,id"
-        ).fetchall()
-        result = []
-        for row in rows:
-            if Decimal(row["remaining_units"]) <= 0:
-                continue
-            quote = self.connection.execute(
-                "SELECT * FROM price_quotes_v2 WHERE commodity_code=? AND quote_commodity_code=? ORDER BY as_of DESC,id DESC LIMIT 1",
-                (row["commodity_code"], row["cost_commodity_code"]),
-            ).fetchone()
-            market_value = None
-            unrealized = None
-            if quote:
-                cost_commodity = self.get_commodity(row["cost_commodity_code"])
-                assert cost_commodity is not None
-                market_value_decimal = quantize(decimal_mul(Decimal(row["remaining_units"]), Decimal(quote["price"])), cost_commodity.scale)
-                market_value = canonical_decimal(market_value_decimal)
-                unrealized = canonical_decimal(decimal_sub(market_value_decimal, Decimal(row["remaining_cost"])))
-            result.append({
-                "lotId": row["id"],
-                "accountId": row["account_id"],
-                "commodityCode": row["commodity_code"],
-                "acquiredDate": row["acquired_date"],
-                "originalUnits": row["original_units"],
-                "remainingUnits": row["remaining_units"],
-                "originalCost": row["original_cost"],
-                "remainingCost": row["remaining_cost"],
-                "costCommodityCode": row["cost_commodity_code"],
-                "latestPrice": quote["price"] if quote else None,
-                "priceAsOf": quote["as_of"] if quote else None,
-                "marketValue": market_value,
-                "unrealizedPnL": unrealized,
-            })
-        return result
-
+        return ledger_reports.holdings(self)
     def get_holding(self, holding_id: str) -> dict[str, Any] | None:
         return next((item for item in self.holdings() if item["lotId"] == holding_id), None)
 
     def dashboard(self) -> dict[str, Any]:
-        flows = self.account_flows()
-        holdings = self.holdings()
-        cash: dict[str, Decimal] = defaultdict(Decimal)
-        for flow in flows:
-            account = self.get_account(flow["accountId"])
-            if account and account.type == "asset" and account.subtype.lower() == "cash":
-                cash[flow["commodityCode"]] = decimal_add(cash[flow["commodityCode"]], Decimal(flow["balance"]))
-        holding_cost: dict[str, Decimal] = defaultdict(Decimal)
-        holding_market: dict[str, Decimal] = defaultdict(Decimal)
-        missing_prices: dict[str, int] = defaultdict(int)
-        realized: dict[str, Decimal] = defaultdict(Decimal)
-        for item in holdings:
-            currency = item["costCommodityCode"]
-            holding_cost[currency] = decimal_add(holding_cost[currency], Decimal(item["remainingCost"]))
-            if item["marketValue"] is None:
-                missing_prices[currency] += 1
-            else:
-                holding_market[currency] = decimal_add(holding_market[currency], Decimal(item["marketValue"]))
-        realized_rows = self.connection.execute(
-            "SELECT p.side,p.valuation_amount,e.balancing_commodity_code FROM postings_v2 p JOIN journal_entries_v2 e ON e.id=p.entry_id JOIN accounts_v2 a ON a.id=p.account_id WHERE a.type='income' AND lower(a.subtype) IN ('realized-gain','investment-gain')"
-        ).fetchall()
-        for row in realized_rows:
-            amount = Decimal(row["valuation_amount"])
-            realized[row["balancing_commodity_code"]] = decimal_add(realized[row["balancing_commodity_code"]], amount if row["side"] == "credit" else amount.copy_negate())
-        currencies = sorted(set(cash) | set(holding_cost) | set(holding_market) | set(realized))
-        summaries = []
-        for currency in currencies:
-            summaries.append({
-                "commodityCode": currency,
-                "cash": canonical_decimal(cash[currency]),
-                "holdingCostBasis": canonical_decimal(holding_cost[currency]),
-                "holdingMarketValue": canonical_decimal(holding_market[currency]),
-                "bookValue": canonical_decimal(decimal_add(cash[currency], holding_cost[currency])),
-                "marketValue": canonical_decimal(decimal_add(cash[currency], holding_market[currency])),
-                "unrealizedPnL": canonical_decimal(decimal_sub(holding_market[currency], holding_cost[currency])),
-                "realizedPnL": canonical_decimal(realized[currency]),
-                "missingPriceCount": missing_prices[currency],
-            })
-        return {
-            "entryCount": self.connection.execute("SELECT COUNT(*) FROM journal_entries_v2").fetchone()[0],
-            "draftCount": self.connection.execute("SELECT COUNT(*) FROM journal_drafts_v2 WHERE status='draft'").fetchone()[0],
-            "openLotCount": len(holdings),
-            "commoditySummaries": summaries,
-            "formulas": {
-                "accountBalance": "asset/expense: debit-credit; liability/equity/income: credit-debit",
-                "holdingCostBasis": "sum(open lot remainingCost)",
-                "holdingMarketValue": "sum(open lot remainingUnits * latest explicit price quote)",
-            },
-            "assumptions": [
-                "Decimal strings are authoritative.",
-                "No implicit FX conversion or external market data is used.",
-            ],
-        }
-
+        return ledger_reports.dashboard(self)
     def financial_statements(self) -> list[dict[str, Any]]:
-        totals: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
-        rows = self.connection.execute(
-            "SELECT p.side,p.valuation_amount,e.balancing_commodity_code,a.type FROM postings_v2 p JOIN journal_entries_v2 e ON e.id=p.entry_id JOIN accounts_v2 a ON a.id=p.account_id"
-        ).fetchall()
-        for row in rows:
-            amount = Decimal(row["valuation_amount"])
-            debit = amount if row["side"] == "debit" else Decimal(0)
-            credit = amount if row["side"] == "credit" else Decimal(0)
-            totals[(row["balancing_commodity_code"], row["type"])] = decimal_add(totals[(row["balancing_commodity_code"], row["type"])], normal_balance(row["type"], debit, credit))
-        currencies = sorted({key[0] for key in totals})
-        return [{
-            "commodityCode": currency,
-            "assets": canonical_decimal(totals[(currency, "asset")]),
-            "liabilities": canonical_decimal(totals[(currency, "liability")]),
-            "equity": canonical_decimal(totals[(currency, "equity")]),
-            "income": canonical_decimal(totals[(currency, "income")]),
-            "expenses": canonical_decimal(totals[(currency, "expense")]),
-            "netIncome": canonical_decimal(decimal_sub(totals[(currency, "income")], totals[(currency, "expense")])),
-        } for currency in currencies]
-
+        return ledger_reports.financial_statements(self)
     def cash_flow(self) -> list[dict[str, Any]]:
-        groups: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
-        rows = self.connection.execute(
-            "SELECT p.side,p.units,p.commodity_code,p.cash_flow_category,a.type,a.subtype FROM postings_v2 p JOIN accounts_v2 a ON a.id=p.account_id WHERE a.type='asset' AND lower(a.subtype)='cash'"
-        ).fetchall()
-        for row in rows:
-            value = Decimal(row["units"]) if row["side"] == "debit" else Decimal(row["units"]).copy_negate()
-            groups[(row["commodity_code"], row["cash_flow_category"])] = decimal_add(groups[(row["commodity_code"], row["cash_flow_category"])], value)
-        return [
-            {"commodityCode": commodity, "category": category, "amount": canonical_decimal(value)}
-            for (commodity, category), value in sorted(groups.items())
-        ]
-
+        return ledger_reports.cash_flow(self)
     def reconciliation(self) -> dict[str, Any]:
-        checks: list[dict[str, str]] = []
-        unbalanced = []
-        for row in self.connection.execute("SELECT id FROM journal_entries_v2"):
-            postings = self.connection.execute("SELECT side,valuation_amount FROM postings_v2 WHERE entry_id=?", (row[0],)).fetchall()
-            debit = decimal_sum(Decimal(item["valuation_amount"]) for item in postings if item["side"] == "debit")
-            credit = decimal_sum(Decimal(item["valuation_amount"]) for item in postings if item["side"] == "credit")
-            if debit != credit:
-                unbalanced.append(row[0])
-        invalid_lots = []
-        for lot in self.connection.execute("SELECT * FROM lots_v2"):
-            movements = self.connection.execute(
-                "SELECT action,units,cost FROM lot_movements_v2 WHERE lot_id=?", (lot["id"],)
-            ).fetchall()
-            acquire_count = sum(1 for item in movements if item["action"] == "acquire")
-            units = Decimal(lot["original_units"])
-            cost = Decimal(lot["original_cost"])
-            for movement in movements:
-                if movement["action"] == "dispose":
-                    units = decimal_sub(units, Decimal(movement["units"]))
-                    cost = decimal_sub(cost, Decimal(movement["cost"]))
-                elif movement["action"] == "restore":
-                    units = decimal_add(units, Decimal(movement["units"]))
-                    cost = decimal_add(cost, Decimal(movement["cost"]))
-                elif movement["action"] == "reverse-acquire":
-                    units = decimal_sub(units, Decimal(movement["units"]))
-                    cost = decimal_sub(cost, Decimal(movement["cost"]))
-            if (
-                acquire_count != 1
-                or units != Decimal(lot["remaining_units"])
-                or cost != Decimal(lot["remaining_cost"])
-                or units < 0
-                or cost < 0
-            ):
-                invalid_lots.append(lot["id"])
-        checks.append({
-            "id": "entry-balance",
-            "status": "pass" if not unbalanced else "error",
-            "detail": "All posted entries balance exactly." if not unbalanced else f"Unbalanced entries: {len(unbalanced)}",
-        })
-        checks.append({
-            "id": "lot-conservation",
-            "status": "pass" if not invalid_lots else "error",
-            "detail": "Lot movements reconcile exactly to every open balance." if not invalid_lots else f"Invalid lots: {len(invalid_lots)}",
-        })
-        fk = self.connection.execute("PRAGMA foreign_key_check").fetchall()
-        checks.append({
-            "id": "foreign-keys",
-            "status": "pass" if not fk else "error",
-            "detail": "Foreign-key check passed." if not fk else f"Foreign-key violations: {len(fk)}",
-        })
-        missing_prices = sum(1 for item in self.holdings() if item["latestPrice"] is None)
-        checks.append({
-            "id": "price-availability",
-            "status": "pass" if missing_prices == 0 else "warning",
-            "detail": "All open lots have an explicit price quote." if missing_prices == 0 else f"Open lots without a price: {missing_prices}",
-        })
-        return {"status": "error" if any(item["status"] == "error" for item in checks) else "pass", "checks": checks}
-
+        return ledger_reports.reconciliation(self)
     def export_bundle(self) -> dict[str, Any]:
         return {
             "formatVersion": 2,
@@ -815,67 +657,18 @@ class LedgerRepository:
             "monthlyPlans": [dump(item) for item in self.list_monthly_plans()],
         }
 
-    def create_backup(self) -> dict[str, Any]:
-        table_order = [
-            "commodities_v2", "accounts_v2", "price_quotes_v2", "journal_drafts_v2",
-            "journal_entries_v2", "postings_v2", "lots_v2", "lot_movements_v2",
-            "recurring_entry_rules_v2", "living_accounts_v2", "living_snapshots_v2", "monthly_plans_v2",
-        ]
-        payload = {
-            table: [dict(row) for row in self.connection.execute(f"SELECT * FROM {table} ORDER BY rowid")]
-            for table in table_order
-        }
-        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        return {
-            "formatVersion": 2,
-            "schemaVersion": 2,
-            "createdAt": now_iso(),
-            "payload": payload,
-            "sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
-        }
-
+    def create_backup(self, *, format_version: int = 2) -> dict[str, Any]:
+        return ledger_backup.create_backup(self.connection, format_version=format_version)
     def restore_backup(self, backup: dict[str, Any]) -> dict[str, int]:
-        if backup.get("formatVersion") != 2 or backup.get("schemaVersion") != 2:
-            raise ValueError("Backup formatVersion and schemaVersion must both be 2.")
-        payload = backup.get("payload")
-        if not isinstance(payload, dict):
-            raise ValueError("Backup payload is missing.")
-        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        if digest != backup.get("sha256"):
-            raise ValueError("Backup SHA-256 does not match its canonical payload.")
-        insert_order = [
-            "commodities_v2", "accounts_v2", "price_quotes_v2", "journal_drafts_v2",
-            "journal_entries_v2", "postings_v2", "lots_v2", "lot_movements_v2",
-            "recurring_entry_rules_v2", "living_accounts_v2", "living_snapshots_v2", "monthly_plans_v2",
-        ]
-        expected = set(insert_order)
-        if set(payload) != expected:
-            raise ValueError("Backup contains missing or unknown tables.")
-        if any(self.connection.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() for table in insert_order):
-            raise ValueError("Backup restore requires an empty v2 ledger.")
-        counts: dict[str, int] = {}
-        before = self._mutable_snapshot()
         with transaction(self.connection):
-            for table in insert_order:
-                allowed_columns = [row[1] for row in self.connection.execute(f"PRAGMA table_info({table})")]
-                rows = payload[table]
-                if not isinstance(rows, list):
-                    raise ValueError(f"Backup table {table} must be a row list.")
-                for row in rows:
-                    if not isinstance(row, dict) or set(row) != set(allowed_columns):
-                        raise ValueError(f"Backup row shape for {table} does not match schema v2.")
-                    placeholders = ",".join("?" for _ in allowed_columns)
-                    self.connection.execute(
-                        f"INSERT INTO {table}({','.join(allowed_columns)}) VALUES ({placeholders})",
-                        tuple(row[column] for column in allowed_columns),
-                    )
-                counts[table] = len(rows)
-            if self.connection.execute("PRAGMA foreign_key_check").fetchall():
-                raise ValueError("Restored backup failed foreign-key validation.")
-            self._save_undo(before)
+            before = self._mutable_snapshot()
+            counts = ledger_backup.restore_backup(self.connection, backup)
+            if backup['formatVersion'] == 2:
+                self._save_undo(before)
+            else:
+                # Immutable closes/corrections are not a generic undo snapshot.
+                self._invalidate_undo()
         return counts
-
     def latest_undo(self) -> dict[str, str] | None:
         row = self.connection.execute(
             "SELECT token,expires_at FROM undo_operations_v2 WHERE consumed_at IS NULL ORDER BY created_at DESC LIMIT 1"
@@ -890,9 +683,12 @@ class LedgerRepository:
         snapshot = json.loads(row["snapshot_json"])
         with transaction(self.connection):
             self.connection.execute("PRAGMA defer_foreign_keys=ON")
-            for table in self.MUTABLE_DELETE_ORDER:
+            tables = self._mutable_tables()
+            if set(snapshot) != set(tables):
+                raise ValueError("Undo belongs to a different schema and cannot be applied.")
+            for table in (['financial_accounts_v3'] if 'financial_accounts_v3' in tables else []) + self.MUTABLE_DELETE_ORDER:
                 self.connection.execute(f"DELETE FROM {table}")
-            for table in self.MUTABLE_TABLES:
+            for table in tables:
                 columns = [item[1] for item in self.connection.execute(f"PRAGMA table_info({table})")]
                 for item in snapshot[table]:
                     placeholders = ",".join("?" for _ in columns)
@@ -908,64 +704,11 @@ class LedgerRepository:
         return {"undone": True, "undoToken": token}
 
     def world(self) -> dict[str, Any]:
-        living: dict[str, Decimal] = defaultdict(Decimal)
-        income: dict[str, Decimal] = defaultdict(Decimal)
-        expense: dict[str, Decimal] = defaultdict(Decimal)
-        for item in self.list_living_accounts():
-            living[item.commodity_code] = decimal_add(living[item.commodity_code], Decimal(item.balance))
-        for item in self.list_monthly_plans():
-            target = income if item.kind == "income" else expense
-            target[item.commodity_code] = decimal_add(target[item.commodity_code], Decimal(item.amount))
-        market = {
-            item["commodityCode"]: Decimal(item["holdingMarketValue"])
-            for item in self.dashboard()["commoditySummaries"]
-        }
-        currencies = sorted(set(living) | set(income) | set(expense) | set(market))
-        grouped: dict[str, list[LivingSnapshotV2]] = defaultdict(list)
-        for item in self.list_living_snapshots():
-            grouped[item.recorded_at].append(item)
-        latest: dict[str, tuple[str, Decimal]] = {}
-        series: dict[str, list[dict[str, str]]] = defaultdict(list)
-        for recorded_at in sorted(grouped):
-            for item in grouped[recorded_at]:
-                latest[item.account_id] = (item.commodity_code, Decimal(item.balance))
-            totals: dict[str, Decimal] = defaultdict(Decimal)
-            for commodity, value in latest.values():
-                totals[commodity] = decimal_add(totals[commodity], value)
-            for commodity, value in totals.items():
-                previous = Decimal(series[commodity][-1]["value"]) if series[commodity] else value
-                series[commodity].append({
-                    "recordedAt": recorded_at,
-                    "value": canonical_decimal(value),
-                    "delta": canonical_decimal(decimal_sub(value, previous)),
-                })
-        return {
-            "commoditySummaries": [{
-                "commodityCode": commodity,
-                "livingBalance": canonical_decimal(living[commodity]),
-                "investmentMarketValue": canonical_decimal(market.get(commodity, Decimal(0))),
-                "combinedValue": canonical_decimal(decimal_add(living[commodity], market.get(commodity, Decimal(0)))),
-                "expectedIncome": canonical_decimal(income[commodity]),
-                "expectedExpense": canonical_decimal(expense[commodity]),
-                "expectedNet": canonical_decimal(decimal_sub(income[commodity], expense[commodity])),
-            } for commodity in currencies],
-            "balanceSeries": [
-                {"commodityCode": commodity, "points": points} for commodity, points in sorted(series.items())
-            ],
-        }
-
+        return ledger_reports.world(self)
     # Internal helpers ----------------------------------------------------
     @staticmethod
     def _account_from_row(row: sqlite3.Row) -> Account:
-        return Account.model_validate({
-            "id": row["id"],
-            "code": row["code"],
-            "name": row["name"],
-            "type": row["type"],
-            "subtype": row["subtype"],
-            "allowedCommodityCodes": json.loads(row["allowed_commodities_json"]),
-            "status": row["status"],
-        })
+        return PersonalFinanceSnapshot.ledger_account(row)
 
     @staticmethod
     def _quote_from_row(row: sqlite3.Row) -> PriceQuote:
@@ -1183,8 +926,12 @@ class LedgerRepository:
     def _mutable_snapshot(self) -> dict[str, list[dict[str, Any]]]:
         return {
             table: [dict(row) for row in self.connection.execute(f"SELECT * FROM {table} ORDER BY rowid")]
-            for table in self.MUTABLE_TABLES
+            for table in self._mutable_tables()
         }
+
+    def _mutable_tables(self) -> list[str]:
+        native = self.connection.execute("SELECT 1 FROM sqlite_master WHERE name='financial_accounts_v3'").fetchone()
+        return self.MUTABLE_TABLES + (["financial_accounts_v3"] if native else [])
 
     def _save_undo(self, snapshot: dict[str, list[dict[str, Any]]]) -> dict[str, str]:
         now = datetime.now(timezone.utc)

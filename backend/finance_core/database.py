@@ -99,7 +99,19 @@ def connect(path: str | Path = DEFAULT_DATABASE_PATH) -> sqlite3.Connection:
     connection.execute("PRAGMA busy_timeout = 5000")
     if database_path != ":memory:":
         connection.execute("PRAGMA journal_mode = WAL")
-    connection.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    from finance_core.schema_migration import CURRENT_SCHEMA, schema_version, upgrade
+    version = schema_version(connection)
+    if version == 0:
+        if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table'").fetchone():
+            connection.close()
+            raise ValueError("Unversioned database requires explicit migration review.")
+        connection.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        with transaction(connection):
+            upgrade(connection)
+    elif version > CURRENT_SCHEMA or version < 2:
+        connection.close()
+        raise ValueError("Unsupported ledger schema; explicit migration review is required.")
+    # A schema-2 Vault stays byte-semantically unchanged. New APIs refuse it.
     return connection
 
 

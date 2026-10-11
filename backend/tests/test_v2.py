@@ -92,8 +92,8 @@ def create_and_post(api: TestClient, payload: dict) -> dict:
 def test_health_and_decimal_aggregate_lifecycle(tmp_path: Path):
     with client(tmp_path) as api:
         health = api.get("/api/v2/health").json()
-        assert health["apiVersion"] == "3.2.0"
-        assert health["ledgerSchemaVersion"] == 2
+        assert health["apiVersion"] == "3.3.0"
+        assert health["ledgerSchemaVersion"] == 3
         seed(api)
         payload = opening_draft()
         assert api.post("/api/v2/journal-entry-drafts", json=payload).status_code == 201
@@ -355,56 +355,3 @@ def test_openapi_contract_keeps_ledger_writes_bounded(tmp_path: Path):
         assert set(spec["paths"][f"{prefix}/holdings"]) == {"get"}
         assert set(spec["paths"][f"{prefix}/journal-entries/{{entry_id}}"]) == {"get"}
         assert "post" in spec["paths"][f"{prefix}/journal-entry-drafts/{{draft_id}}/post"]
-
-
-def test_csv_import_creates_validated_draft_only(tmp_path: Path):
-    with client(tmp_path) as api:
-        seed(api)
-        csv_body = (
-            "entryId,date,description,payee,source,reference,tags,balancingCommodityCode,postingId,accountId,side,units,commodityCode,valuationRate,rateType,cashFlowCategory,memo,lotAction,lotId,lotAllocationsJson\n"
-            "csv-entry,2026-08-17,Synthetic CSV,,csv,,,CNY,csv-p1,cash-cny,debit,10,CNY,,,income,,,,\n"
-            "csv-entry,2026-08-17,Synthetic CSV,,csv,,,CNY,csv-p2,capital,credit,10,CNY,,,income,,,,\n"
-        )
-        response = api.post("/api/v2/import/drafts.csv", content=csv_body, headers={"Content-Type": "text/csv"})
-        assert response.status_code == 201, response.text
-        assert response.json()["imported"] == 1
-        assert api.get("/api/v2/journal-entries").json()["data"] == []
-
-
-def test_living_world_uses_decimal_strings(tmp_path: Path):
-    with client(tmp_path) as api:
-        seed(api)
-        living = {
-            "id": "living", "name": "Synthetic Daily", "commodityCode": "CNY",
-            "balance": "100.10", "note": "Synthetic", "updatedAt": "2026-08-17T00:00:00Z",
-        }
-        assert api.post("/api/v2/living-accounts", json=living).status_code == 201
-        recorded = api.post("/api/v2/living-accounts/living/record-balance", json={"balance": "120.20"})
-        assert recorded.status_code == 200
-        assert recorded.json()["snapshot"]["balance"] == "120.2"
-        plan = {
-            "id": "plan", "kind": "expense", "name": "Synthetic Plan", "amount": "50.05",
-            "commodityCode": "CNY", "category": "living", "recurringMonthly": True,
-            "dayOfMonth": 1, "startDate": "2026-08-17", "note": "",
-        }
-        assert api.post("/api/v2/monthly-plans", json=plan).status_code == 201
-        world = api.get("/api/v2/world").json()["data"]
-        assert world["commoditySummaries"][0]["livingBalance"] == "120.2"
-        assert world["commoditySummaries"][0]["expectedExpense"] == "50.05"
-
-
-def test_hashed_backup_restores_only_into_empty_v2_ledger(tmp_path: Path):
-    with client(tmp_path / "source-duplicate") as source:
-        seed(source)
-        assert source.post("/api/v2/journal-entry-drafts", json=opening_draft()).status_code == 201
-        backup = source.get("/api/v2/backup").json()["data"]
-        assert len(backup["sha256"]) == 64
-    with client(tmp_path / "target-duplicate") as target:
-        restored = target.post("/api/v2/backup/restore", json=backup)
-        assert restored.status_code == 201, restored.text
-        assert len(target.get("/api/v2/commodities").json()["data"]) == 3
-        assert len(target.get("/api/v2/journal-entry-drafts").json()["data"]) == 1
-        assert target.post("/api/v2/backup/restore", json=backup).status_code == 422
-    tampered = {**backup, "sha256": "0" * 64}
-    with client(tmp_path / "tampered-duplicate") as target:
-        assert target.post("/api/v2/backup/restore", json=tampered).status_code == 422

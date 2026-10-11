@@ -67,7 +67,7 @@ def create_app(
 
     app = FastAPI(
         title="Finance Core API",
-        version="3.2.0",
+        version="3.3.0",
         description="Local-first deterministic finance domain and multi-vault data service.",
         lifespan=lifespan,
     )
@@ -80,6 +80,8 @@ def create_app(
     global_router, scoped_router = create_v3_routers(configured_admin_token)
     app.include_router(global_router)
     app.include_router(scoped_router)
+    from finance_core.api_personal import create_personal_router
+    app.include_router(create_personal_router())
 
     original_openapi = app.openapi
 

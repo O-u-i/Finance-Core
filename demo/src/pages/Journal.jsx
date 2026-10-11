@@ -63,6 +63,7 @@ export default function Journal({ fc }) {
             <Field label="Balancing commodity"><select value={editor.balancingCommodityCode} onChange={(e) => set('balancingCommodityCode', e.target.value)}>{commodities.map((item) => <option key={item.code}>{item.code}</option>)}</select></Field>
             <Field label="Source" value={editor.source} onChange={(e) => set('source', e.target.value)}/>
             <Field label="Reference" value={editor.reference} onChange={(e) => set('reference', e.target.value)}/>
+            <Field label="Tags (comma separated; Living reconciliation: personal-transfer:in:CNY / personal-transfer:out:CNY)" value={editor.tags.join(', ')} onChange={e => set('tags',e.target.value.split(',').map(value => value.trim()).filter(Boolean))}/>
             <Field label="Tags (comma separated)" value={editor.tags.join(',')} onChange={(e) => set('tags', e.target.value.split(',').map((tag) => tag.trim()).filter(Boolean))}/>
           </div>
           {!accounts.length && <p className="notice">Add active accounts and commodities in Master data before creating a draft.</p>}

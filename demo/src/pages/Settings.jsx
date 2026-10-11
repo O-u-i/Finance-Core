@@ -1,9 +1,8 @@
 import React from 'react';
 import { API_VERSION, SERVICE_VERSION } from '../api.js';
-import { Button, Panel, ResourceForm, Table } from '../components.jsx';
+import { Button, Panel, ResourceForm, Table, options } from '../components.jsx';
 import Setup from './Setup.jsx';
 import { Backup } from './Data.jsx';
-import { options } from './Master.jsx';
 
 export default function Settings({ fc }) {
   const control = async (api, path, body, method = 'POST') => {
@@ -21,7 +20,7 @@ export default function Settings({ fc }) {
   const active = fc.workspaces.filter((item) => item.status === 'active').map((item) => ({ value: item.id, label: item.displayName }));
   return <>
     <Setup fc={fc} compact/>
-    {!fc.setup.masterReady && <Backup fc={fc} restoreOnly/>}
+    <Backup fc={fc}/>
     <Panel title="Workspaces" description="Each Vault owns one complete finance database. Archive for read-only access or move files to recoverable quarantine.">
       <ResourceForm fc={{ ...fc, readonly: false }} fields={[
         ['displayName', 'Workspace name'], ['kind', 'Kind', 'text', options(['personal', 'sandbox'])],

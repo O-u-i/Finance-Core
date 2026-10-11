@@ -1,4 +1,8 @@
-# Finance Core 3.3.0
+# Finance Core 3.4.0
+
+[Unified personal and investment accounting](docs/md/05-unified-personal-accounting.md): one Vault, Investment Journal plus Living month-end balances, general beneficiary agreements, manual assets and reconciliation. The existing horizontal navigation is retained. Local builds are not production migration, installation or publication.
+
+Overview is display-only; horizontal segment navigation is sticky. Master data centralizes Investment/Living registration with safe unused-account deletion and history-preserving end-purpose controls. Living snapshots show paged latest-per-account readouts with expandable history. Schema-2 Vaults retain their original storage and require explicit migration for dated Living lifecycle and personal reconciliation.
 
 Finance Core (FC) is a local-first finance domain and data service with its own standalone UI. An optional, separately released FRAG-harness plugin can read a small, selected set of FC records. FC remains independently runnable and is the only runtime that writes its finance SQLite files.
 
@@ -93,11 +97,11 @@ Loans, principal investment, debt repayment and transfers are not income/expense
 
 ## API and compatibility
 
-The public API is rooted at `/api/v3`. `GET /api/v3/health` reports the API version and optional build or release commit metadata without paths or secrets. API 3.2.0 adds a named, read-only monthly report and confirmed balanced-row CSV validation to the existing scoped API. Existing Journal/read contracts remain compatible. `DraftValidationResponse` exposes `workspaceId`, `valid`, `issues`, and `preview`. Legacy `/api/v1` and `/api/v2` HTTP routes are no longer registered.
+The public API is rooted at `/api/v3`. `GET /api/v3/health` reports the API version and optional build or release commit metadata without paths or secrets. API 3.3.0 adds owner-session-only unified registration, monthly Living observations, asset valuations, beneficiary agreements, immutable month closes and personal reconciliation. The existing API 3.2 monthly Journal report and balanced-row CSV validation remain unchanged. Existing Journal/read contracts remain compatible. `DraftValidationResponse` exposes `workspaceId`, `valid`, `issues`, and `preview`. Legacy `/api/v1` and `/api/v2` HTTP routes are no longer registered.
 
-Control routes cover sessions, the current user, Workspaces, access tokens, and undo. Finance routes are scoped under `/api/v3/workspaces/{workspaceId}/...`. The [released OpenAPI artifact](docs/release/finance-core-v3.3.0-openapi.json) is the detailed endpoint and field contract.
+Control routes cover sessions, the current user, Workspaces, access tokens, and undo. Finance routes are scoped under `/api/v3/workspaces/{workspaceId}/...`. The [released OpenAPI artifact](docs/release/finance-core-v3.4.0-openapi.json) is the detailed endpoint and field contract.
 
-Patch releases make compatible fixes. Minor releases may add endpoints or optional fields. Removing, renaming, changing requiredness, or changing semantics requires a new major version. FC 3.3.0's released OpenAPI artifact and manifest are in `docs/release/`.
+Patch releases make compatible fixes. Minor releases may add endpoints or optional fields. Removing, renaming, changing requiredness, or changing semantics requires a new major version. FC 3.4.0's released OpenAPI artifact and manifest are in `docs/release/`.
 
 Ordinary reversible create, update, delete, import, batch, balance-recording, and backup-restore operations return an operation ID, undo token, expiry, Workspace ID, and operation type. Undo is single-use, expires after ten minutes, and is invalidated by a later write. Posted facts use linked reversal instead of ordinary undo.
 
@@ -112,7 +116,7 @@ flowchart LR
     Pack --> Native["Native Local Agent tool result"]
 ```
 
-The plugin archive has exactly `manifest.json`, `adapter.py`, and `ui.js` at its root. The current reader 1.2.0 requires FRAG plugin protocol 2, FRAG host 1.12.1 or later, and FC API 3.2.0. The adapter exposes read-only dashboard and scope routes and reads at most ten explicitly selected report or Journal IDs from one authorized Workspace per request. Report discovery does not fetch every report. FRAG uses only its evidence hooks, not the archived plugin dashboard UI. FC credentials stay on the backend. All Journal mutations happen in FC's own UI after FC authentication.
+The plugin archive has exactly `manifest.json`, `adapter.py`, and `ui.js` at its root. The current reader 1.3.0 requires FRAG plugin protocol 2, FRAG host 1.12.1 or later, and FC API 3.3.0. The adapter exposes read-only dashboard and scope routes and reads at most ten explicitly selected report or Journal IDs from one authorized Workspace per request. Report discovery does not fetch every report. FRAG uses only its evidence hooks, not the archived plugin dashboard UI. FC credentials stay on the backend. All Journal mutations happen in FC's own UI after FC authentication.
 
 See the [plugin archive contract and verification guide](docs/md/02-frag-finance-core-plugin.md). Both repositories can be synchronized in one explicitly authorized maintenance task. Production installation, commits, pushes, tags and public releases remain separate human operations.
 
@@ -140,11 +144,11 @@ npm.cmd run check:release
 python tools/build_frag_plugin.py --check
 ```
 
-The release check compares the generated OpenAPI schema and hash with the local API 3.2.0 artifact for product 3.3.0. The plugin check verifies the archive contents and pinned hashes. Changes to FC and FRAG require separate review, commits, tags, and releases.
+The release check compares the generated OpenAPI schema and hash with the local API 3.3.0 artifact for product 3.4.0. The plugin check verifies the archive contents and pinned hashes. Changes to FC and FRAG require separate review, commits, tags, and releases.
 
 ## React UI structure and compatibility
 
-Product 3.3.0 adds API 3.2.0 and optional FRAG reader 1.2.0 / protocol 2 while retaining ledger schema 2 and registry schema 1. The API addition is compatible; the byte-pinned optional consumer must explicitly synchronize its reader/API versions. Earlier release artifacts remain unchanged. Local build artifacts are not a public release or production installation.
+Product 3.4.0 adds API 3.3.0, ledger schema 3 and optional FRAG reader 1.3.0 / protocol 2; registry schema remains 1. Existing Vaults never auto-upgrade. Real migration needs separate explicit approval and a stopped-writer new copy. New personal reports remain owner-session-only; FRAG read authorization is not expanded. The API addition is compatible; the byte-pinned optional consumer must explicitly synchronize its reader/API versions. Earlier release artifacts remain unchanged. Local build artifacts are not a public release or production installation.
 
 `demo/src/main.jsx` mounts the React application. The app shell owns hash navigation, session entry and Workspace selection. Feature pages own their forms. The API client and request coordinator cancel obsolete reads, retain Decimal strings and prevent duplicate writes; the backend owns calculations and persistence. Master data and Settings occupy the upper configuration navigation. The financial navigation follows Journal → T-accounts → Securities & positions → Cash flow → Statements. Plans, import/export and master data use contextual tabs. Journal steps require backend validation and explicit confirmation; changing a draft invalidates the preview. Import structure checking does not claim financial validation.
 
@@ -154,7 +158,7 @@ The refined navigation uses one selected surface on a quiet rectangular rail, wi
 
 Workspace archive, quarantine, restore and ledger requests share a stable per-Vault lock. Global ledger undo uses the same authorization and status rules. Quarantine/restore preflight all files, move explicit files individually, and compensate if a move or registry transaction fails. No directory purge is performed. These protections coordinate requests in one FC process; run one FC writer process for a configured data root. Filesystem movement and SQLite cannot form one crash-atomic transaction; preserve backups and seek manual review after an interrupted filesystem operation.
 
-Production output is **`dist/v3.3.0/`**, containing the frontend and `THIRD-PARTY-NOTICES.txt`. Builds overwrite stable filenames without recursively clearing output directories. Earlier ignored `dist` output is not part of the current bundle. React 19.3.0, React DOM 19.3.0 and scheduler 0.28.0 are pinned; build checks verify their reviewed MIT notices and reject legacy API routes, browser storage, bundled fonts and private data/rule assets. No website deployment is included.
+Production output is **`dist/v3.4.0/`**, containing the frontend and `THIRD-PARTY-NOTICES.txt`. Builds overwrite stable filenames without recursively clearing output directories. Earlier ignored `dist` output is not part of the current bundle. React 19.3.0, React DOM 19.3.0 and scheduler 0.28.0 are pinned; build checks verify their reviewed MIT notices and reject legacy API routes, browser storage, bundled fonts and private data/rule assets. No website deployment is included.
 
 For synthetic local browser verification, run an isolated backend with a project-local temporary data root and set `FC_UI_API_TARGET` for the Vite proxy. The browser smoke tool uses the installed Archify Chrome transport via `ARCHIFY_SKILL_ROOT` (or the user's installed skill directory). All profiles, screenshots and synthetic data belong in ignored `.tmp/`; never point this test at a personal Vault. Existing Horizon 3.0.0 remains a candidate-direction baseline, not a promise of implemented features.
 

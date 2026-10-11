@@ -1,18 +1,20 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useFinance, views } from './state.jsx';
-import { mainViews, configurationViews } from './navigation.js';
+import { segmentViews, configurationViews } from './navigation.js';
 import Setup from './pages/Setup.jsx';
 import { SERVICE_VERSION } from './api.js';
 import { Button, Field, Logo, Panel, Select, StepContent } from './components.jsx';
-import { Overview, Reports } from './pages/Dashboard.jsx';
+import { Reports } from './pages/Dashboard.jsx';
 import Journal from './pages/Journal.jsx';
 import Master from './pages/Master.jsx';
 import Planning from './pages/Planning.jsx';
 import Data from './pages/Data.jsx';
 import Settings from './pages/Settings.jsx';
 import MonthlyReview from './pages/MonthlyReview.jsx';
+import { PersonalOverview, MonthlyBalances, AssetsLiabilities, PersonalMonthlyReview } from './pages/PersonalFinance.jsx';
+import { LivingData } from './pages/SegmentData.jsx';
 
-const pages = { overview: Overview, journal: Journal, taccounts: Reports, positions: Reports, cashflow: Reports, statements: Reports, monthlyreview: MonthlyReview, master: Master, planning: Planning, data: Data, settings: Settings };
+const pages = { overview: PersonalOverview, journal: Journal, taccounts: Reports, positions: Reports, cashflow: Reports, statements: Reports, monthlyreview: PersonalMonthlyReview, legacyreview: MonthlyReview, master: Master, planning: Planning, plans: Planning, balances: MonthlyBalances, assets: AssetsLiabilities, livingreview: PersonalMonthlyReview, livingdata: LivingData, data: Data, settings: Settings };
 function Auth({ fc }) {
   return <div className="auth-layout"><Logo/><div className="auth-copy"><h1>Keep your finances<br/>close. See them clearly.</h1><p>A private, local workspace for your financial records.</p><div className="auth-lines" aria-hidden="true"><span/><span/><span/></div></div><Panel title="Enter your workspace" description="Sign in with your local admin token."><form onSubmit={(event) => {
     event.preventDefault(); const form = event.currentTarget, secret = new FormData(form).get('adminToken');
@@ -41,8 +43,10 @@ export default function App() {
     };
     measure(); const observer = new ResizeObserver(measure); observer.observe(nav);
     return () => observer.disconnect();
-  }, [fc.route.view, fc.session, menu]);
-  const Page = pages[fc.route.view];
+  }, [fc.route.view, fc.route.segment, fc.session, menu]);
+  const segment = fc.route.segment || (['balances','assets','plans','livingreview','livingdata'].includes(fc.route.view) ? 'living' : 'investment');
+  const navKeys = fc.migrationRequired && segment === 'living' ? ['planning'] : segmentViews[segment];
+  const Page = fc.route.view === 'monthlyreview' && (!fc.route.segment || fc.migrationRequired) ? MonthlyReview : pages[fc.route.view];
   const blocked = !fc.setup.ready && !configurationViews.includes(fc.route.view);
   return <><a href="#main-content" className="skip-link" onClick={(e) => { e.preventDefault(); document.querySelector('#main-content')?.focus(); }}>Skip to content</a>
     {fc.notice && <div className={`global-notice notice ${fc.notice.error ? 'error' : 'success'}`} role={fc.notice.error ? 'alert' : 'status'}><span>{fc.notice.text}</span><Button aria-label="Dismiss notification" onClick={() => fc.setNotice(null)}>×</Button></div>}
@@ -52,13 +56,15 @@ export default function App() {
     {fc.session === 'wizard' && <Wizard fc={fc}/>}
     {fc.session === 'ready' && fc.workspace && <div className="app-shell">
       <header className="app-header"><div className="identity-row"><a className="brand-link" href="#/overview" onClick={(e) => { e.preventDefault(); fc.navigate('overview'); }}><Logo/></a><div className="session-tools"><span className="session-label">Owner session<small>{fc.sessionOrigin === 'restored' ? 'Restored from this browser' : 'Signed in with your admin token'}</small></span><Button disabled={fc.busy} onClick={fc.signOut}>Sign out</Button></div></div>
-        <div className="configuration-row"><nav className="configuration-nav" aria-label="Configuration navigation">{configurationViews.map(key => <button key={key} data-status={(key === 'master' ? fc.setup.masterReady : fc.setup.sessionReady && fc.setup.workspaceReady) ? 'ready' : 'pending'} disabled={fc.busy} aria-current={fc.route.view === key ? 'page' : undefined} className={fc.route.view === key ? 'active' : ''} onClick={() => fc.navigate(key)}><span>{views[key][0]}</span><small className="configuration-status">{key === 'master' ? (fc.setup.masterReady ? 'Ready' : 'Setup required') : (fc.setup.sessionReady && fc.setup.workspaceReady ? 'Ready' : 'Setup required')}</small></button>)}</nav><div className="workspace-tools"><Select label={<><span>Workspace</span><span className="workspace-kind" data-kind={fc.workspace.kind}>{fc.workspace.kind}</span></>} value={fc.workspace.id} disabled={fc.busy} onChange={fc.switchWorkspace} options={fc.workspaces.filter(item => item.status !== 'quarantined').map(item => ({ value: item.id, label: item.displayName }))}/></div></div>
+        <div className="configuration-row"><nav className="configuration-nav" aria-label="Configuration navigation">{configurationViews.map(key => <button key={key} data-status={key === 'overview' ? undefined : (key === 'master' ? fc.setup.masterReady : fc.setup.sessionReady && fc.setup.workspaceReady) ? 'ready' : 'pending'} disabled={fc.busy} aria-current={fc.route.view === key ? 'page' : undefined} className={`${key === 'overview' ? 'dashboard-link' : ''} ${fc.route.view === key ? 'active' : ''}`} onClick={() => fc.navigate(key, '', segment)}><span>{views[key][0]}</span>{key !== 'overview' && <small className="configuration-status">{key === 'master' ? (fc.setup.masterReady ? 'Ready' : 'Setup required') : (fc.setup.sessionReady && fc.setup.workspaceReady ? 'Ready' : 'Setup required')}</small>}</button>)}</nav><div className="workspace-tools"><Select label={<><span>Workspace</span><span className="workspace-kind" data-kind={fc.workspace.kind}>{fc.workspace.kind}</span></>} value={fc.workspace.id} disabled={fc.busy} onChange={fc.switchWorkspace} options={fc.workspaces.filter(item => item.status !== 'quarantined').map(item => ({ value: item.id, label: item.displayName }))}/></div></div>
       </header>
+      <div className="segment-switcher" role="group" aria-label="Ledger segment">{['investment','living'].map(value => <Button key={value} disabled={fc.busy} aria-pressed={segment === value} primary={segment === value} onClick={() => fc.navigate(value === 'living' ? (fc.migrationRequired ? 'planning' : 'balances') : 'journal','',value)}>{value === 'living' ? 'Living' : 'Investment'}</Button>)}</div>
       <Button aria-expanded={menu} aria-controls="main-navigation" className="mobile-nav-toggle" disabled={fc.busy} onClick={() => setMenu(!menu)}>Menu <span aria-hidden="true">{menu ? '−' : '+'}</span></Button>
-      <nav ref={navigation} id="main-navigation" className={`pill-nav ${menu ? 'open' : ''} ${pill ? 'has-indicator' : ''}`} aria-label="Main navigation">{pill && <span className="nav-indicator" aria-hidden="true" style={pill}/>} {mainViews.map(key => <button key={key} disabled={fc.busy || !fc.setup.ready} aria-current={fc.route.view === key ? 'page' : undefined} className={fc.route.view === key ? 'active' : ''} onClick={() => fc.navigate(key)}><span>{views[key][0]}</span></button>)}</nav>
+      <nav ref={navigation} id="main-navigation" className={`pill-nav ${menu ? 'open' : ''} ${pill ? 'has-indicator' : ''}`} style={{ '--nav-count': navKeys.length }} aria-label="Main navigation">{pill && <span className="nav-indicator" aria-hidden="true" style={pill}/>} {navKeys.map(key => <button key={key} disabled={fc.busy || !fc.setup.ready} aria-current={fc.route.view === key ? 'page' : undefined} className={fc.route.view === key ? 'active' : ''} onClick={() => fc.navigate(key, '', segment)}><span>{views[key][0]}</span></button>)}</nav>
       <main id="main-content" tabIndex={-1} key={fc.workspace.id} aria-busy={fc.busy || fc.loading}>
         {fc.route.view !== 'overview' && <div className="page-heading"><div><p>{fc.workspace.displayName}</p><h1>{views[fc.route.view][0]}</h1></div><span className="badge">{fc.workspace.status === 'archived' ? 'Read only' : 'Workspace scoped'}</span></div>}
         {fc.readonly && <p className="notice">Archived workspace · records are read-only. Restore it in Settings to make changes.</p>}
+        {fc.migrationRequired && <p className="notice" role="status">Schema 2 Vault retained without automatic migration. Existing Investment ledger and Journal reports remain available. New personal accounting requires a separately approved stopped-writer migration into a new copy.</p>}
         {(fc.busy || fc.loading) && <div className="loading-line" role="status">{fc.busy ? 'Applying operation…' : 'Loading records…'}</div>}
         <div inert={fc.loading || undefined}><StepContent className="page-content" step={`${fc.route.view}/${fc.route.tab}`}><React.Fragment key={`${fc.route.view}/${fc.route.tab}/${blocked}`} >{blocked ? <Setup fc={fc}/> : <Page fc={fc}/>}</React.Fragment></StepContent></div>
       </main>
