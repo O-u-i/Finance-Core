@@ -100,7 +100,7 @@ try {
   if(process.env.FC_UI_LEGACY_WORKSPACE) {
     await click('Settings','.configuration-nav');await settled();
     await fill('.workspace-tools select',process.env.FC_UI_LEGACY_WORKSPACE);await settled();
-    await wait("document.body.textContent.includes('Schema 2 Vault retained without automatic migration')");
+    assert.equal(await evaluate("document.querySelector('main').textContent.includes('Schema 2 Vault retained')"),false);
     await click('Investment','.segment-switcher');await settled();
     assert.equal(await evaluate("document.body.textContent.includes('Synthetic opening')"),true);
     await click('Master data','.configuration-nav');await settled();await click('Accounts','.subnav');await settled();

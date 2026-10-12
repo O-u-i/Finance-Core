@@ -38,11 +38,12 @@ export default function App() {
     const nav = navigation.current;
     if (!nav) return;
     const measure = () => {
+      document.documentElement.style.setProperty('--nav-clearance', `${nav.offsetHeight + 24}px`);
       const active = nav.querySelector('button.active');
       setPill(active?.getClientRects().length ? { width: active.offsetWidth, height: active.offsetHeight, transform: `translate(${active.offsetLeft}px, ${active.offsetTop}px)` } : null);
     };
     measure(); const observer = new ResizeObserver(measure); observer.observe(nav);
-    return () => observer.disconnect();
+    return () => { observer.disconnect(); document.documentElement.style.removeProperty('--nav-clearance'); };
   }, [fc.route.view, fc.route.segment, fc.session, menu]);
   const segment = fc.route.segment || (['balances','assets','plans','livingreview','livingdata'].includes(fc.route.view) ? 'living' : 'investment');
   const navKeys = fc.migrationRequired && segment === 'living' ? ['planning'] : segmentViews[segment];
@@ -64,7 +65,6 @@ export default function App() {
       <main id="main-content" tabIndex={-1} key={fc.workspace.id} aria-busy={fc.busy || fc.loading}>
         {fc.route.view !== 'overview' && <div className="page-heading"><div><p>{fc.workspace.displayName}</p><h1>{views[fc.route.view][0]}</h1></div><span className="badge">{fc.workspace.status === 'archived' ? 'Read only' : 'Workspace scoped'}</span></div>}
         {fc.readonly && <p className="notice">Archived workspace · records are read-only. Restore it in Settings to make changes.</p>}
-        {fc.migrationRequired && <p className="notice" role="status">Schema 2 Vault retained without automatic migration. Existing Investment ledger and Journal reports remain available. New personal accounting requires a separately approved stopped-writer migration into a new copy.</p>}
         {(fc.busy || fc.loading) && <div className="loading-line" role="status">{fc.busy ? 'Applying operation…' : 'Loading records…'}</div>}
         <div inert={fc.loading || undefined}><StepContent className="page-content" step={`${fc.route.view}/${fc.route.tab}`}><React.Fragment key={`${fc.route.view}/${fc.route.tab}/${blocked}`} >{blocked ? <Setup fc={fc}/> : <Page fc={fc}/>}</React.Fragment></StepContent></div>
       </main>

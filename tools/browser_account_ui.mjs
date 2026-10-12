@@ -86,18 +86,32 @@ try {
   await capture('sticky-navigation-1440'); checks.push('Horizontal navigation remains sticky with frosted background');
 
   await click('Master data', '.configuration-nav'); await settled();
-  await evaluate('window.scrollTo(0,420)');
+  await evaluate('window.scrollTo(0,200)');
   const tabScroll = await evaluate('window.scrollY');
-  assert(tabScroll > 300, 'Start at the Master data tabs, below the page header');
+  assert.equal(tabScroll, 200, 'Start below the header at a reachable desktop scroll offset');
   await click('Accounts', '.subnav'); await settled();
   assert.equal(await evaluate('Math.round(window.scrollY)'), tabScroll, 'Tab changes must preserve scroll');
   await click('Prices', '.subnav'); await settled();
   assert.equal(await evaluate('Math.round(window.scrollY)'), tabScroll);
   await click('Commodities', '.subnav'); await settled();
   assert.equal(await evaluate('Math.round(window.scrollY)'), tabScroll);
-  await capture('master-tabs-1440'); checks.push('Master data tabs preserve scroll position');
+  const tabContrast = await evaluate(`(()=>{
+    const style = getComputedStyle(document.querySelector('.subnav button.selected'));
+    const luminance = color => color.match(/[0-9.]+/g).slice(0, 3).map(Number).map(value => {
+      const channel = value / 255;
+      return channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4;
+    }).reduce((sum, channel, index) => sum + channel * [.2126, .7152, .0722][index], 0);
+    const levels = [luminance(style.color), luminance(style.backgroundColor)].sort((a, b) => a - b);
+    return (levels[1] + .05) / (levels[0] + .05);
+  })()`);
+  assert.ok(tabContrast >= 4.5, `Selected section labels need readable contrast: ${tabContrast.toFixed(2)}:1`);
+  await capture('master-tabs-1440'); checks.push('Master data tabs preserve scroll position and readable contrast');
+  await evaluate('window.scrollTo(0,0)');
+  assert(await evaluate("document.querySelector('main .panel').getBoundingClientRect().top <= 520"), 'Desktop chrome and section tabs must leave room for the working panel');
+  await capture('master-layout-1440'); checks.push('Balanced desktop header, section tabs and working panel');
 
   await fill('.workspace-tools select', fixture.legacyWorkspaceId); await settled();
+  assert.equal(await evaluate("document.querySelector('main').textContent.includes('Schema 2 Vault retained')"), false, 'Legacy compatibility must not add a page-wide Schema banner');
   await click('Master data', '.configuration-nav'); await settled(); await click('Accounts', '.subnav'); await settled();
   assert.equal(await evaluate("!!document.querySelector('select[name=segment]')"), true, 'Schema-2 registration also exposes the segment selector');
   await glide('segment', 'Living');
@@ -155,6 +169,7 @@ try {
   assert.equal(await evaluate("document.querySelector('[aria-label=\"Latest balance snapshots\"] table tbody').children.length"), 10);
   assert.equal(await evaluate("document.querySelector('[aria-label=\"Latest balance snapshots\"] tbody td:nth-child(2)').textContent"), '9007199254740993.01', 'Decimal strings are never rounded by the UI');
   await evaluate("document.querySelector('.balance-account').scrollIntoView({block:'start'})");
+  assert(await evaluate("document.querySelector('.balance-account').getBoundingClientRect().top > document.querySelector('#main-navigation').getBoundingClientRect().bottom"), 'Scrolling to an account must not hide it under the sticky navigation');
   await capture('monthly-balances-1440');
   await evaluate("document.querySelector('.balance-account > summary').click()");
   assert.equal(await evaluate("document.querySelector('.balance-account input[inputmode=decimal]').value"), '9007199254740993.01');
@@ -186,9 +201,18 @@ try {
   assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
   await evaluate("document.querySelector('.snapshot-list').scrollIntoView({block:'center'})");
   await capture('monthly-snapshots-1920'); checks.push('Schema-3 central registration, safe deletion and dated end-purpose preserve history');
+  await send('Emulation.setDeviceMetricsOverride', { width: 1024, height: 900, deviceScaleFactor: 1, mobile: false });
+  await evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+  await evaluate("document.querySelector('.balance-account').scrollIntoView({block:'start'})");
+  assert(await evaluate("document.querySelector('.balance-account').getBoundingClientRect().top > document.querySelector('#main-navigation').getBoundingClientRect().bottom"), 'Wrapped desktop navigation must also leave scroll targets visible');
+  assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
+  await capture('monthly-balances-1024'); checks.push('Narrow desktop navigation keeps account scroll targets visible');
 
   writeFileSync(join(evidence, 'receipt.json'), JSON.stringify({ syntheticOnly: true, checks, productionMigration: false }, null, 2));
   console.log(JSON.stringify({ passed: checks.length, evidence }));
+} catch (error) {
+  await capture('failure').catch(() => {});
+  throw error;
 } finally {
   browser.cdp.failAll(new Error('Owned synthetic verification finished'));
   if (browser.child.exitCode === null) browser.child.kill();

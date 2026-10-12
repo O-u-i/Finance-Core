@@ -25,7 +25,7 @@ function Coverage({ report }) {
 
 export function PersonalOverview({ fc }) {
   const [perspective, setPerspective] = useState(['investment','living'].includes(fc.route.tab) ? fc.route.tab : 'consolidated');
-  if (fc.migrationRequired) return <Panel title="Financial overview" description="Legacy Vault readouts. Pool assets include third-party interests; these values are not reconciled personal net worth.">
+  if (fc.migrationRequired) return <Panel className="financial-overview" title="Financial overview" description="Legacy Vault readouts. Pool assets include third-party interests; these values are not reconciled personal net worth.">
     <Table caption="Legacy balances by currency" rows={fc.data.world?.commoditySummaries} columns={[[ 'commodityCode','Currency'],['livingBalance','Recorded Living balance'],['investmentMarketValue','Investment pool value']]}/>
     <Table caption="Investment ledger readouts" rows={fc.data.legacyDashboard?.commoditySummaries} columns={[[ 'commodityCode','Currency'],['cash','Ledger cash'],['bookValue','Book value'],['marketValue','Market value'],['missingPriceCount','Missing prices']]}/>
   </Panel>;
@@ -34,8 +34,8 @@ export function PersonalOverview({ fc }) {
   const columns = perspective === 'investment' ? [['currency','Currency'],['investmentAssets','Pool assets (market)'],['investmentLiabilities','Pool liabilities'],['residualEquity','Residual equity'],['ownerInvestmentValue','Your economic stake']]
     : perspective === 'living' ? [['currency','Currency'],['livingAssets','Financial assets'],['livingLiabilities','Personal liabilities'],['nonFinancialAssets','Manual asset values'],['openingCash','Opening cash'],['closingCash','Closing cash']]
       : [['currency','Currency'],['knownPersonalSubtotal','Known-input subtotal (may be partial)'],['personalNetWorth','Reconciled personal net worth'],['ownerInvestmentValue','Investment economic stake'],['livingLiabilities','Personal liabilities']];
-  return <><Panel title="Financial overview" description="Read-only month-end dashboard. Pool assets are not personal wealth; currencies and third-party interests remain separate."><Tabs items={[[ 'consolidated','Consolidated'],['investment','Investment'],['living','Living']]} value={perspective} onChange={setPerspective}/><Coverage report={report}/><Table caption={`${perspective} financial overview`} rows={rows} columns={columns}/></Panel>
-    {report?.currencies.map(item => <Panel key={item.currency} title={`${item.currency} · beneficial ownership`}><Table rows={item.ownerships} columns={[[ 'partyId','Beneficiary', value => fc.data.parties?.find(party => party.id === value.partyId)?.name || 'Unknown beneficiary'],['claims','Accrued claims'],['residualShare','Residual share'],['residualValue','Residual value (may be negative)'],['economicValue','Economic value']]}/></Panel>)}
+  return <><Panel className="financial-overview" title="Financial overview" description="Read-only month-end dashboard. Pool assets are not personal wealth; currencies and third-party interests remain separate."><Tabs items={[[ 'consolidated','Consolidated'],['investment','Investment'],['living','Living']]} value={perspective} onChange={setPerspective}/><Coverage report={report}/><Table caption={`${perspective} financial overview`} rows={rows} columns={columns}/></Panel>
+    {report?.currencies.map(item => <Panel className="financial-overview" key={item.currency} title={`${item.currency} · beneficial ownership`}><Table rows={item.ownerships} columns={[[ 'partyId','Beneficiary', value => fc.data.parties?.find(party => party.id === value.partyId)?.name || 'Unknown beneficiary'],['claims','Accrued claims'],['residualShare','Residual share'],['residualValue','Residual value (may be negative)'],['economicValue','Economic value']]}/></Panel>)}
   </>;
 }
 

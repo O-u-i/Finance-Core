@@ -2,7 +2,7 @@
 
 [Unified personal and investment accounting](docs/md/05-unified-personal-accounting.md): one Vault, Investment Journal plus Living month-end balances, general beneficiary agreements, manual assets and reconciliation. The existing horizontal navigation is retained. Local builds are not production migration, installation or publication.
 
-Overview is display-only; horizontal segment navigation is sticky. Master data centralizes Investment/Living registration with safe unused-account deletion and history-preserving end-purpose controls. Living snapshots show paged latest-per-account readouts with expandable history. Schema-2 Vaults retain their original storage and require explicit migration for dated Living lifecycle and personal reconciliation.
+Overview is display-only; horizontal segment navigation is sticky. Desktop navigation and section spacing stay compact, selected tabs keep readable text contrast, amounts align to the right, and scroll targets remain below the sticky bar. Master data centralizes Investment/Living registration with safe unused-account deletion and history-preserving end-purpose controls. Living snapshots show paged latest-per-account readouts with expandable history. Schema-2 Vaults retain their original storage and require explicit migration for dated Living lifecycle and personal reconciliation; compatibility is handled in the relevant controls, without a page-wide Schema banner.
 
 Finance Core (FC) is a local-first finance domain and data service with its own standalone UI. An optional, separately released FRAG-harness plugin can read a small, selected set of FC records. FC remains independently runnable and is the only runtime that writes its finance SQLite files.
 
