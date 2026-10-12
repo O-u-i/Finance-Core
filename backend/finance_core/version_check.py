@@ -9,7 +9,7 @@ from finance_core.release_artifact import check as check_release_artifacts
 
 
 ROOT = Path(__file__).resolve().parents[2]
-EXPECTED = "3.4.0"
+EXPECTED = "3.5.0"
 
 
 def main() -> None:

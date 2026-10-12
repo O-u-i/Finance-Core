@@ -42,7 +42,7 @@ def active_in(item: dict, month: str) -> bool:
 
 def latest_observations(observations: list[dict]) -> dict[tuple[str, str, str], dict]:
     replaced = {item['supersedes'] for item in observations if item.get('supersedes')}
-    return {(item['kind'], item['subjectId'], item['month']): item for item in observations if item['id'] not in replaced}
+    return {(item['kind'], item['subjectId'], item['month']): item for item in observations if item['id'] not in replaced and not item.get('observedDate')}
 
 
 def arrangement_for(arrangements: list[dict], currency: str, month: str) -> dict | None:

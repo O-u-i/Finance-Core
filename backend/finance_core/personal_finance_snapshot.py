@@ -39,6 +39,63 @@ class PersonalFinanceSnapshot:
         return [{**item, **current.get(item['id'], {})} if item['balanceSource'] == 'ledger' else item
                 for item in self._json_rows('financial_accounts_v3')]
 
+    def referenced_commodity_codes(self) -> set[str]:
+        """Current configuration and retained facts both prevent commodity deletion."""
+        tables = {row['name'] for row in self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        codes: set[str] = set()
+        columns = [
+            ('price_quotes_v2', ('commodity_code', 'quote_commodity_code')),
+            ('journal_entries_v2', ('balancing_commodity_code',)),
+            ('postings_v2', ('commodity_code',)),
+            ('lots_v2', ('commodity_code', 'cost_commodity_code')),
+            ('living_accounts_v2', ('commodity_code',)), ('living_snapshots_v2', ('commodity_code',)),
+            ('monthly_plans_v2', ('commodity_code',)),
+            *[(table, ('currency',)) for table in ('transactions', 'holdings', 'recurring_transactions',
+                                                 'living_accounts', 'living_account_snapshots', 'monthly_plans')],
+        ]
+        for table, names in columns:
+            if table in tables:
+                for name in names:
+                    codes.update(row[0].strip().upper() for row in self.connection.execute(f'SELECT DISTINCT {name} FROM {table}'))
+        for row in self.connection.execute('SELECT allowed_commodities_json FROM accounts_v2'):
+            codes.update(code.strip().upper() for code in json.loads(row[0]))
+
+        # Match typed reference fields, never free text such as names or memos.
+        keys = {'commodityCode', 'quoteCommodityCode', 'balancingCommodityCode', 'costCommodityCode',
+                'currency', 'commodity_code', 'quote_commodity_code', 'balancing_commodity_code', 'cost_commodity_code'}
+
+        def collect(value):
+            if isinstance(value, list):
+                for item in value:
+                    collect(item)
+            elif isinstance(value, dict):
+                for key, item in value.items():
+                    if key in keys and isinstance(item, str):
+                        codes.add(item.strip().upper())
+                    elif key == 'allowedCommodityCodes':
+                        codes.update(code.strip().upper() for code in item)
+                    else:
+                        collect(item)
+
+        for table, names in [
+            ('journal_drafts_v2', ('payload_json',)), ('recurring_entry_rules_v2', ('payload_json',)),
+            ('financial_accounts_v3', ('payload_json',)), ('non_financial_assets_v3', ('payload_json',)),
+            ('investment_arrangements_v3', ('payload_json',)), ('monthly_observations_v3', ('payload_json',)),
+            ('legacy_living_archive_v3', ('payload_json',)), ('finance_migration_receipts_v3', ('payload_json',)),
+            ('arrangement_drafts_v3', ('request_json', 'draft_json')),
+        ]:
+            if table in tables:
+                for row in rows(self.connection, table):
+                    for name in names:
+                        collect(json.loads(row[name]))
+        if 'monthly_closes_v3' in tables:
+            for row in rows(self.connection, 'monthly_closes_v3'):
+                state = json.loads(row['input_json'])
+                # Even a zero/unused registry entry is part of a confirmed close's provenance.
+                codes.update(item['code'].strip().upper() for item in state['commodities'])
+                collect(state)
+        return codes
+
     def account_is_referenced(self, account_id: str) -> bool:
         """Include JSON references, not just posted balances; never erase provenance."""
         tables = {row['name'] for row in self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -192,7 +249,8 @@ class PersonalFinanceSnapshot:
         lot_ids = {value['lot_id'] for value in state['movements']}
         state['lots'] = [{key: value for key, value in lot.items() if key not in {'remaining_units','remaining_cost'}} for lot in state['lots'] if lot['id'] in lot_ids]
         state['quotes'] = [value for value in state['quotes'] if within(value['as_of'])]
-        state['observations'] = [value for value in state['observations'] if value['month'] <= month]
+        # v1 close/reconciliation inputs remain month-end facts, never dated readouts.
+        state['observations'] = [value for value in state['observations'] if value['month'] <= month and not value.get('observedDate')]
         state['arrangements'] = [value for value in state['arrangements'] if value['fromMonth'] <= month]
         state['interestConfirmations'] = [json.loads(row['request_json']) for row in rows(self.connection,'arrangement_drafts_v3') if row['id'] in ids and json.loads(row['request_json'])['operation'] == 'interest']
         state['unmappedLegacyLiving'] = self.legacy_living()['unmappedIds']
@@ -275,7 +333,9 @@ class PersonalFinanceSnapshot:
         observation_groups = {}
         for value in observations.values():
             previous = observations.get(value.get('supersedes'))
-            if previous and any(previous[key] != value[key] for key in ('subjectId','kind','month','currency')):
+            if value.get('supersedes') and not previous:
+                raise ValueError('Restored observation correction source is missing.')
+            if previous and any(previous.get(key) != value.get(key) for key in ('subjectId','kind','month','currency','observedDate')):
                 raise ValueError('Restored observation correction changed its identity.')
             subject = assets.get(value['subjectId']) if value['kind']=='valuation' else accounts.get(value['subjectId'])
             if value['kind']!='transfer' and subject is None:
@@ -286,19 +346,19 @@ class PersonalFinanceSnapshot:
                 raise ValueError('Restored valuation currency conflicts with its asset.')
             for field in ('amount','incoming','outgoing','fees','inTransit'):
                 self.require_currency(value['currency'],value.get(field))
-            observation_groups.setdefault((value['subjectId'],value['month'],value['kind']),[]).append(value)
+            observation_groups.setdefault((value['subjectId'],value['month'],value['kind'],value.get('observedDate')),[]).append(value)
         for group in observation_groups.values():
             replaced={value['supersedes'] for value in group if value.get('supersedes')}
             heads=[value for value in group if value['id'] not in replaced]
-            if len(heads)!=1:
+            if not heads or (not group[0].get('observedDate') and len(heads)!=1):
                 raise ValueError('Restored monthly observations require one correction chain per identity.')
             seen=set()
-            current=heads[0]
-            while current:
-                if current['id'] in seen:
-                    raise ValueError('Restored observation correction chain is cyclic.')
-                seen.add(current['id'])
-                current=observations.get(current.get('supersedes'))
+            for current in heads:
+                while current:
+                    if current['id'] in seen:
+                        raise ValueError('Restored observation correction chain is cyclic or merged.')
+                    seen.add(current['id'])
+                    current=observations.get(current.get('supersedes'))
             if len(seen)!=len(group):
                 raise ValueError('Restored observation correction chain is disconnected.')
         for row in rows(self.connection,'arrangement_drafts_v3'):

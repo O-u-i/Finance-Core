@@ -34,18 +34,32 @@ export function selectedMonth(route, now = new Date()) {
   return /^[0-9]{4}-(0[1-9]|1[0-2])$/.test(month) ? month : latestCompletedMonth(now);
 }
 
+export function shanghaiDate(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
+  return ['year', 'month', 'day'].map(type => parts.find(part => part.type === type).value).join('-');
+}
+
+export function selectedRecordedMonth(route, now = new Date()) {
+  const month = route.month || route.tab;
+  return /^[0-9]{4}-(0[1-9]|1[0-2])$/.test(month) ? month : shanghaiDate(now).slice(0, 7);
+}
+
 export function viewPaths(view, tab = '', now = new Date(), segment = '', asOfMonth = '') {
   const month = selectedMonth({ tab, month: asOfMonth }, now);
   if (view === 'legacyreview' || (view === 'monthlyreview' && !segment)) return { monthlyReview: `/reports/monthly-review?month=${month}` };
   const personal = { financialAccounts: '/financial-accounts', parties: '/finance-parties', financeSettings: '/personal-finance-settings' };
-  if (view === 'overview') return { ...personal, personalReport: `/reports/personal-balance-sheet?month=${month}` };
+  const recordedMonth = selectedRecordedMonth({ tab, month: asOfMonth }, now);
+  const recorded = { balanceRecords: '/balance-records', recordedReport: `/reports/living-recorded-balances?month=${recordedMonth}` };
+  if (view === 'overview') return { ...personal, personalReport: `/reports/personal-balance-sheet?month=${month}`, recordedReport: recorded.recordedReport };
   if (view === 'master') return { ...views.master[1], ...personal, living: '/living-accounts', ...(tab === 'ownership' ? {
     legacyMapping: '/legacy-living-mapping', arrangements: '/investment-arrangements', personalReport: `/reports/personal-balance-sheet?month=${month}`,
   } : {}) };
-  if (['balances','assets','monthlyreview','livingreview','livingdata'].includes(view)) {
+  if (view === 'balances') return { ...personal, ...recorded, observations: '/monthly-observations' };
+  if (['assets','monthlyreview','livingreview','livingdata'].includes(view)) {
     const result = { ...views[view][1], ...personal, assets: '/non-financial-assets', observations: '/monthly-observations', arrangements: '/investment-arrangements', closes: '/monthly-closes' };
     const report = view === 'livingreview' ? 'living-monthly-review' : view === 'monthlyreview' ? 'investment-monthly-review' : 'personal-balance-sheet';
-    result.personalReport = `/reports/${report}?month=${month}`;
+    result.personalReport = `/reports/${report}?month=${view === 'livingreview' ? recordedMonth : month}`;
+    if (view === 'livingreview') Object.assign(result, recorded);
     return result;
   }
   if (view === 'plans') return { ...views[view][1], financialAccounts: '/financial-accounts' };

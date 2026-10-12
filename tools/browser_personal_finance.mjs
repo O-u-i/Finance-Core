@@ -52,20 +52,25 @@ try {
 
   await click('Living','.segment-switcher');await settled();
   assert.equal(await evaluate("[...document.querySelectorAll('.pill-nav button span')].map(item=>item.textContent).join('|')"),'Accounts & balances|Assets & liabilities|Monthly plans|Monthly review|Import & export');
-  await fill('input[type=month]','2026-08');await settled();
-  await evaluate("document.querySelector('.balance-account > summary').click()");
-  await fill('.balance-account input[inputmode=decimal]','400');
+  await fill('select[name=subjectId]','living');
+  await fill('input[name=observedDate]','2026-08-20'); await fill('input[name=amount]','400');
   const cancelled=click('Master data','.configuration-nav');cancelled.catch(()=>{});
   await browser.cdp.waitFor('Page.javascriptDialogOpening',session);await send('Page.handleJavaScriptDialog',{accept:false});await cancelled;
-  assert.equal(await evaluate('location.hash'),'#/living/balances/2026-08');
-  checks.push('dirty form cancels cross-area navigation without discarding the observation');
-  await evaluate("(()=>{const form=document.querySelector('.balance-account form');const inputs=form.querySelectorAll('input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(inputs[1],'Synthetic UI statement');inputs[1].dispatchEvent(new Event('input',{bubbles:true}));Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(inputs[2],'Synthetic correction');inputs[2].dispatchEvent(new Event('input',{bubbles:true}));form.querySelector('input[type=checkbox]').click();})()");
-  await click('Confirm balance','.balance-account');await settled();
+  assert.equal(await evaluate('location.hash'),'#/living/balances');
+  checks.push('dirty form cancels cross-area navigation without discarding the dated balance');
+  const revisionBefore=await evaluate("(async()=>{const p='/api/v3/workspaces/'+document.querySelector('.workspace-tools select').value;return (await (await fetch(p+'/reports/personal-balance-sheet?month=2026-08')).json()).data.revision;})()");
+  await fill('input[name=source]','Synthetic actual-date UI statement');
+  await evaluate("document.querySelector('.recorded-balance-form input[type=checkbox]').click()");
+  await click('Record balance','.recorded-balance-form');await settled();
+  assert.equal(await evaluate("(async()=>{const p='/api/v3/workspaces/'+document.querySelector('.workspace-tools select').value;return (await (await fetch(p+'/reports/personal-balance-sheet?month=2026-08')).json()).data.revision;})()"),revisionBefore,'An actual-date balance must not rewrite month-end inputs');
+  // An explicitly observed legacy month-end fact is separate setup, never inferred from today's balance.
+  await evaluate("(async()=>{const p='/api/v3/workspaces/'+document.querySelector('.workspace-tools select').value;const records=(await (await fetch(p+'/monthly-observations')).json()).data;const replaced=new Set(records.map(item=>item.supersedes));const current=records.find(item=>item.subjectId==='living' && item.month==='2026-08' && item.kind==='balance' && !replaced.has(item.id));const r=await fetch(p+'/monthly-observations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'ui-legacy-month-end',subjectId:'living',month:'2026-08',kind:'balance',currency:'CNY',amount:'400',confirmed:true,source:'Synthetic separate month-end statement',supersedes:current.id,reason:'Explicit old-contract reconciliation fixture'})});if(!r.ok)throw Error('Legacy setup failed');})()");
   await click('Monthly review','.pill-nav');await settled();await fill('input[type=month]','2026-08');await settled();
+  await evaluate("document.querySelector('.legacy-reconciliation > summary').click()");
   await fill('input[name=outgoing]','600');await fill('input[name=reason]','Synthetic transfer confirmation');
   await evaluate("document.querySelector('input[name=outgoing]').closest('form').querySelector('input[type=checkbox]').click()");
   await click('Confirm totals');await settled();
-  await capture('living-review-1440');checks.push('Living month-end corrections and aggregate transfer reconciliation, no detailed transaction page');
+  await capture('living-review-1440');checks.push('Dated Living entry stays separate from explicit legacy month-end transfer reconciliation');
 
   await click('Overview','.configuration-nav');await settled();await evaluate("location.hash='#/overview/consolidated/2026-08'");await settled();
   assert.equal(await evaluate("document.body.textContent.includes('5447.5')"),true);

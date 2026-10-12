@@ -14,6 +14,7 @@ from finance_core.models_v2 import Account, JournalEntryDraft, canonical_decimal
 from finance_core.models_personal import (
     ArrangementDraftRequest, CloseRequest, FinancialAccount, FinanceSettings,
     InvestmentArrangement, MonthlyObservation, NonFinancialAsset, Party, LegacyMappingRequest,
+    BalanceRecordRequest,
 )
 from finance_core.personal_finance import (
     allocate_distribution, arrangement_for, effective_date,
@@ -24,6 +25,7 @@ from finance_core.schema_migration import (
 )
 
 from finance_core.personal_finance_snapshot import PersonalFinanceSnapshot, RevisionConflict, dump
+from finance_core.recorded_balances import calculate_recorded_balances
 
 
 class PersonalFinanceRepository:
@@ -50,7 +52,20 @@ class PersonalFinanceRepository:
         return self.snapshot.arrangements()
 
     def observations(self) -> list[dict]:
-        return self.snapshot.observations()
+        return [value for value in self.snapshot.observations() if not value.get('observedDate')]
+
+    def balance_records(self) -> list[dict]:
+        return [value for value in self.snapshot.observations() if value.get('observedDate')]
+
+    def record_balance(self, item: BalanceRecordRequest) -> dict:
+        observation = MonthlyObservation.model_validate({**dump(item), 'kind': 'balance',
+                                                       'month': item.observed_date[:7]})
+        self.record_observation(observation)
+        return next(value for value in self.balance_records() if value['id'] == item.id)
+
+    def recorded_balance_report(self, month: str) -> dict:
+        month_end(month)
+        return calculate_recorded_balances(month, self.accounts(), self.balance_records())
 
     def settings(self) -> dict | None:
         return self.snapshot.settings()
@@ -193,6 +208,8 @@ class PersonalFinanceRepository:
 
     def _record_observation(self, item: MonthlyObservation) -> dict:
         month_end(item.month)
+        if item.observed_date and item.observed_date > datetime.now(timezone(timedelta(hours=8))).date().isoformat():
+            raise ValueError('A balance date cannot be in the future (Asia/Shanghai).')
         for amount in (item.amount, item.incoming, item.outgoing, item.fees, item.in_transit):
             self.snapshot.require_currency(item.currency, amount)
         subjects = self.assets() if item.kind == 'valuation' else self.accounts()
@@ -202,10 +219,22 @@ class PersonalFinanceRepository:
                 raise ValueError('Observation subject, measurement source and currency must match.')
             if item.kind == 'balance' and subject.get('endMonth') and item.month > subject['endMonth']:
                 raise ValueError('Account purpose has ended. Only observations within its recorded period are allowed.')
-        current = self.connection.execute('SELECT o.id FROM monthly_observations_v3 o WHERE subject_id=? AND month=? AND kind=? AND NOT EXISTS(SELECT 1 FROM monthly_observations_v3 n WHERE n.supersedes=o.id)', (item.subject_id, item.month, item.kind)).fetchone()
-        if (current['id'] if current else None) != item.supersedes:
-            raise RevisionConflict('Observation changed; corrections must name the current observation id.')
-        if item.confirmed and item.kind == 'balance':
+            if item.observed_date and subject.get('startMonth') and item.month < subject['startMonth']:
+                raise ValueError('Balance date precedes the account purpose period.')
+            if item.observed_date and subject['status'] == 'inactive' and not subject.get('endMonth'):
+                raise ValueError('An inactive account requires an explicit purpose end month before recording historical balances.')
+        observations = self.snapshot.observations()
+        replaced = {value.get('supersedes') for value in observations}
+        if item.observed_date:
+            if item.supersedes:
+                previous = next((value for value in observations if value['id'] == item.supersedes), None)
+                if not previous or previous['id'] in replaced or any(previous.get(key) != dump(item).get(key) for key in ('subjectId', 'kind', 'currency', 'observedDate')):
+                    raise RevisionConflict('A dated correction must name an unreplaced balance with the same account, currency and actual date.')
+        else:
+            current = next((value for value in observations if not value.get('observedDate') and value['subjectId'] == item.subject_id and value['month'] == item.month and value['kind'] == item.kind and value['id'] not in replaced), None)
+            if (current['id'] if current else None) != item.supersedes:
+                raise RevisionConflict('Observation changed; corrections must name the current observation id.')
+        if item.confirmed and item.kind == 'balance' and not item.observed_date:
             subject = next(value for value in subjects if value['id'] == item.subject_id)
             if subject.get('successorOf') and item.month == previous_month(subject['startMonth']):
                 predecessor = next(value for value in self.accounts() if value['id'] == subject['successorOf'])
@@ -377,13 +406,14 @@ class PersonalFinanceRepository:
             return {'formatVersion': 1, 'segment': segment, 'restoreCapable': False, 'accounts': accounts, 'entries': entries,
                     'arrangements': self.arrangements()}
         return {'formatVersion': 1, 'segment': segment, 'restoreCapable': False, 'accounts': accounts, 'assets': self.assets(),
-                'observations': self.observations(), 'monthlyPlans': [dump(value) for value in self.ledger.list_monthly_plans()]}
+                'observations': self.observations(), 'balanceRecords': self.balance_records(),
+                'monthlyPlans': [dump(value) for value in self.ledger.list_monthly_plans()]}
 
     def export_segment_csv(self, segment: str) -> str:
         output = io.StringIO(newline='')
         if segment == 'living':
-            fields = ['id','subjectId','month','kind','currency','amount','incoming','outgoing','fees','inTransit','confirmed','source','supersedes','reason','recordedAt']
-            values = self.observations()
+            fields = ['id','subjectId','month','kind','currency','amount','incoming','outgoing','fees','inTransit','confirmed','source','supersedes','reason','recordedAt','observedDate']
+            values = self.snapshot.observations()
         else:
             fields = ['entryId','date','description','balancingCommodityCode','postingId','accountId','side','units','commodityCode','valuationRate','rateType','memo','tags','lotAction','lotId','lotAllocationsJson']
             values = []

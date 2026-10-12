@@ -1,14 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { id } from '../api.js';
 import { selectedMonth } from '../navigation.js';
-import { Button, Field, Panel, Select, Table } from '../components.jsx';
+import { Button, Empty, Field, Panel, Select, Table } from '../components.jsx';
 
 const types = ['asset', 'liability', 'equity', 'income', 'expense'];
 const segments = [{ value: 'investment', label: 'Investment' }, { value: 'living', label: 'Living' }];
+const codeOrder = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+const emptyFilters = { query: '', type: '', commodity: '', status: '' };
 
-function AccountForm({ fc, editing, onSaved }) {
+function AccountForm({ fc, editing, onSaved, segment, setSegment }) {
   const legacy = !!fc.migrationRequired;
-  const [segment, setSegment] = useState(editing?.segment || fc.route.segment || 'investment');
   const legacyLiving = legacy && segment === 'living';
   const initial = editing || {};
   const currencies = (fc.data.commodities || []).filter(item => item.kind === 'currency' && item.status === 'active').map(item => ({ value: item.code, label: item.code }));
@@ -73,6 +74,8 @@ function EndPurpose({ fc, account, onClose }) {
 }
 
 export default function AccountRegistry({ fc }) {
+  const [segment, setSegment] = useState(fc.route.segment || 'investment');
+  const [filters, setFilters] = useState(emptyFilters);
   const [editing, setEditing] = useState(null);
   const [ending, setEnding] = useState(null);
   const [formVersion, setFormVersion] = useState(0);
@@ -81,7 +84,16 @@ export default function AccountRegistry({ fc }) {
     ...(fc.data.accounts || []).map(item => ({ ...item, segment: 'investment', balanceSource: 'ledger' })),
     ...(fc.data.living || []).map(item => ({ ...item, segment: 'living', balanceSource: 'legacy_snapshot', allowedCommodityCodes: [item.commodityCode], legacyLiving: true })),
   ] : fc.data.financialAccounts || [];
-  const resetForm = (item = null) => { fc.discardChanges(); setEditing(item); setFormVersion(value => value + 1); };
+  const scopedAccounts = accounts.filter(item => item.segment === segment);
+  const query = filters.query.trim().toLowerCase();
+  const visibleAccounts = scopedAccounts.filter(item =>
+    `${item.code || ''} ${item.name}`.toLowerCase().includes(query) &&
+    (!filters.type || (item.type || 'recorded_balance') === filters.type) &&
+    (!filters.commodity || item.allowedCommodityCodes.includes(filters.commodity)) &&
+    (!filters.status || (item.status || 'legacy') === filters.status)).sort((a, b) =>
+    codeOrder.compare(a.code || a.name, b.code || b.name) || codeOrder.compare(a.id, b.id));
+  const filter = (key, value) => setFilters(current => ({ ...current, [key]: value }));
+  const resetForm = (item = null) => { fc.discardChanges(); setEditing(item); if (item) setSegment(item.segment); setFormVersion(value => value + 1); };
   const edit = item => { if (fc.canLeave()) resetForm(item); };
   const remove = item => {
     if (!fc.canLeave() || !confirm(`Delete unused account "${item.name}"? Accounts with history or references must be retained.`)) return;
@@ -91,9 +103,15 @@ export default function AccountRegistry({ fc }) {
     });
   };
   return <Panel title={editing ? 'Edit account' : 'Financial accounts'} description="Register Investment and Living accounts here. Segment is independent of accounting type and beneficiary." action={editing && <Button onClick={() => { if (fc.canLeave()) resetForm(); }}>Cancel edit</Button>}>
-    <AccountForm key={`${editing?.id || 'new'}/${formVersion}`} fc={fc} editing={editing} onSaved={() => setEditing(null)}/>
+    <AccountForm key={`${editing?.id || 'new'}/${formVersion}`} fc={fc} editing={editing} segment={segment} setSegment={value => { setSegment(value); setFilters(emptyFilters); }} onSaved={() => setEditing(null)}/>
     <p>{legacy ? 'Legacy storage is retained. This selector chooses the original ledger or Living registry; full ownership and dated lifecycle require an explicitly migrated or new Schema 3 Vault.' : 'Classification is confirmed when saved. Used accounts lock segment, measurement and ownership; a change requires a dated successor.'}</p>
-    <Table caption="Financial account registry" rows={accounts} rowKey="id" columns={[
+    <div className="account-filters" role="group" aria-label="Account filters"><div className="form-grid">
+      <Field label="Search accounts"><input name="accountSearch" type="search" value={filters.query} placeholder="Code or name" disabled={fc.busy} onChange={event => filter('query', event.target.value)}/></Field>
+      <Select label="Account type" name="accountTypeFilter" value={filters.type} disabled={fc.busy} onChange={value => filter('type', value)} options={[{ value: '', label: 'All types' }, ...types.map(value => ({ value, label: value })), ...(legacy ? [{ value: 'recorded_balance', label: 'Recorded balance' }] : [])]}/>
+      <Select label="Commodity" name="accountCommodityFilter" value={filters.commodity} disabled={fc.busy} onChange={value => filter('commodity', value)} options={[{ value: '', label: 'All commodities' }, ...(fc.data.commodities || []).map(item => ({ value: item.code, label: item.code }))]}/>
+      <Select label="Status" name="accountStatusFilter" value={filters.status} disabled={fc.busy} onChange={value => filter('status', value)} options={[{ value: '', label: 'All statuses' }, { value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }, ...(legacy ? [{ value: 'legacy', label: 'Legacy' }] : [])]}/>
+    </div><div className="actions"><p role="status">{visibleAccounts.length} of {scopedAccounts.length} {segment === 'living' ? 'Living' : 'Investment'} accounts · Code ascending</p><Button type="button" disabled={fc.busy} onClick={() => setFilters(emptyFilters)}>Clear filters</Button></div></div>
+    {visibleAccounts.length ? <Table caption="Financial account registry" rows={visibleAccounts} rowKey="id" columns={[
       ['code', 'Code'], ['name', 'Name'], ['segment', 'Segment'], ['type', 'Type', item => item.type || 'Recorded balance'],
       ['allowedCommodityCodes', 'Commodities', item => item.allowedCommodityCodes.join(', ')], ['status', 'Status', item => item.status || 'Legacy'],
       ['actions', 'Actions', item => <div className="actions">
@@ -101,7 +119,7 @@ export default function AccountRegistry({ fc }) {
         {!item.legacyLiving && item.status !== 'inactive' && <Button data-action="end-purpose" disabled={fc.busy || fc.readonly} onClick={() => { if (fc.canLeave()) { resetForm(); setEnding(item); } }}>End purpose</Button>}
         <Button danger disabled={fc.busy || fc.readonly} onClick={() => remove(item)}>Delete unused</Button>
       </div>],
-    ]}/>
+    ]}/> : <Empty>{scopedAccounts.length ? 'No accounts match these filters.' : 'No accounts registered in this segment.'}</Empty>}
     {ending && <EndPurpose fc={fc} account={ending} onClose={() => setEnding(null)}/>}
   </Panel>;
 }

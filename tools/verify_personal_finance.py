@@ -20,6 +20,7 @@ def main() -> int:
     command = [sys.executable, '-X', 'utf8', '-m', 'pytest', '-q', '-p', 'no:cacheprovider',
                'backend/tests/test_personal_finance.py', 'backend/tests/test_personal_finance_temporal.py',
                'backend/tests/test_personal_finance_integrity.py',
+               'backend/tests/test_recorded_balances.py',
                '--basetemp=' + str(temporary)]
     return subprocess.call(command, cwd=ROOT)
 

@@ -83,7 +83,7 @@ def configured(monkeypatch: pytest.MonkeyPatch, *, records: dict | None = None) 
     monkeypatch.setenv("FINANCE_CORE_PLUGIN_RECORDS_JSON", json.dumps(records or {WORKSPACE: [ENTRY, DRAFT]}))
 
 
-def fake_fc(monkeypatch: pytest.MonkeyPatch, *, version: str = "3.3.0", available: bool = True, report: dict | None = None):
+def fake_fc(monkeypatch: pytest.MonkeyPatch, *, version: str = "3.4.0", available: bool = True, report: dict | None = None):
     seen: list[str] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -140,11 +140,11 @@ def test_archive_integrity_and_exact_contract():
         manifest = json.loads(package.read("manifest.json"))
         assert manifest == expected_manifest()
         assert manifest["protocolVersion"] == 2
-        assert manifest["version"] == "1.3.0"
+        assert manifest["version"] == "1.4.0"
         assert manifest["minHostVersion"] == "1.12.1"
         assert manifest["name"] == "Finance Core"
         assert manifest["capabilities"] == ["evidence.read"]
-        assert manifest["fcApiVersion"] == "3.3.0"
+        assert manifest["fcApiVersion"] == "3.4.0"
     assert "synthetic-read-token" not in (SOURCE / "ui.js").read_text(encoding="utf-8")
     assert "FINANCE_CORE_PLUGIN_READ_TOKEN" not in (SOURCE / "ui.js").read_text(encoding="utf-8")
 

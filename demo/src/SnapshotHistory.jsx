@@ -6,9 +6,10 @@ const dateLabel = value => {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? 'Unknown date' : new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', day: '2-digit', month: 'short', year: 'numeric' }).format(date);
 };
-const newestFirst = (left, right) => (right.month || '').localeCompare(left.month || '')
+const newestFirst = (left, right) => (right.observedDate || right.month || '').localeCompare(left.observedDate || left.month || '')
   || (Date.parse(right.recordedAt) - Date.parse(left.recordedAt))
-  || (right.recordedAt || '').localeCompare(left.recordedAt || '');
+  || (right.recordedAt || '').localeCompare(left.recordedAt || '')
+  || ((left.id || '') === (right.id || '') ? 0 : (left.id || '') < (right.id || '') ? 1 : -1);
 
 function Pager({ page, pages, onChange }) {
   if (pages <= 1) return null;
@@ -30,7 +31,7 @@ function HistoryRows({ records, columns }) {
   ]}/><Pager page={page} pages={pages} onChange={setPage}/></>;
 }
 
-export default function SnapshotHistory({ records = [], accounts = [], legacy = false }) {
+export default function SnapshotHistory({ records = [], accounts = [], legacy = false, dated = false }) {
   const [filter, setFilter] = useState(''), [requestedPage, setPage] = useState(0);
   const byId = new Map(accounts.map(item => [item.id, item]));
   const names = new Map(accounts.map(item => [item.id, item.name]));
@@ -54,13 +55,13 @@ export default function SnapshotHistory({ records = [], accounts = [], legacy = 
     ['account', 'Account', item => names.get(item.subjectId || item.accountId) || 'Archived / unregistered account'],
     ['amount', 'Balance', item => item.amount ?? item.balance],
     ['currency', 'Currency', item => item.currency || item.commodityCode],
-    ['period', legacy ? 'Recorded date' : 'As-of month', item => legacy ? dateLabel(item.recordedAt) : item.month],
+    ['period', dated ? 'Balance date' : legacy ? 'Recorded date' : 'Legacy month (actual date unknown)', item => dated ? item.observedDate : legacy ? dateLabel(item.recordedAt) : item.month],
     ...(!legacy ? [['confirmed', 'Status', item => item.confirmed ? 'Confirmed' : 'Pending']] : []),
   ];
   return <div className="snapshot-list">
     <div className="snapshot-toolbar"><Select label="Account filter" value={filter} onChange={value => { setFilter(value); setPage(0); }} options={[
       { value: '', label: 'All accounts' }, ...latest.map(item => ({ value: item.identity, label: names.get(item.identity) || 'Archived / unregistered account' })),
-    ]}/><p>{groups.size} accounts · {records.length} recorded snapshots. Latest record per account shown; {legacy ? 'recorded dates are not month-end dates.' : 'pending values are not confirmed balances.'}</p></div>
+    ]}/><p>{groups.size} accounts · {records.length} recorded snapshots. Latest record per account shown; {dated ? 'balance dates are actual dates, not month ends.' : legacy ? 'submission dates are not balance dates.' : 'actual balance dates are unknown.'}</p></div>
     <Table caption="Latest balance snapshots" rows={visible.slice(page * pageSize, (page + 1) * pageSize)} rowKey="id" columns={columns}/>
     <Pager page={page} pages={pages} onChange={setPage}/>
     {!!records.length && <details className="snapshot-history"><summary>Snapshot history · {history.length} records</summary><HistoryRows key={filter} records={history} columns={columns}/></details>}

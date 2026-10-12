@@ -53,7 +53,7 @@ export function useFinance() {
     const ticket = gate.read(); setLoading(true);
     try {
       const target = nextRoute || routeRef.current;
-      const paths = { ledgerHealth: '/health', commodities: '/commodities', accounts: '/accounts', ...viewPaths(view, target.tab, new Date(), target.segment, target.month) };
+      const paths = { ledgerHealth: '/health', commodities: '/commodities' + (['master', 'overview'].includes(view) ? '?includeUsage=true' : ''), accounts: '/accounts', ...viewPaths(view, target.tab, new Date(), target.segment, target.month) };
       const result = await readLedgerPaths(client, selected.id, paths, ticket.signal);
       if (result.migrationRequired && view === 'overview') {
         Object.assign(result, await readLedgerPaths(client, selected.id, { legacyDashboard: '/dashboard', world: '/world' }, ticket.signal));

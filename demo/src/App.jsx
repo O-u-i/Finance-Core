@@ -11,10 +11,11 @@ import Planning from './pages/Planning.jsx';
 import Data from './pages/Data.jsx';
 import Settings from './pages/Settings.jsx';
 import MonthlyReview from './pages/MonthlyReview.jsx';
-import { PersonalOverview, MonthlyBalances, AssetsLiabilities, PersonalMonthlyReview } from './pages/PersonalFinance.jsx';
+import { AssetsLiabilities, PersonalMonthlyReview } from './pages/PersonalFinance.jsx';
+import { FinanceOverview, RecordedBalances, RecordedLivingReview } from './pages/RecordedBalances.jsx';
 import { LivingData } from './pages/SegmentData.jsx';
 
-const pages = { overview: PersonalOverview, journal: Journal, taccounts: Reports, positions: Reports, cashflow: Reports, statements: Reports, monthlyreview: PersonalMonthlyReview, legacyreview: MonthlyReview, master: Master, planning: Planning, plans: Planning, balances: MonthlyBalances, assets: AssetsLiabilities, livingreview: PersonalMonthlyReview, livingdata: LivingData, data: Data, settings: Settings };
+const pages = { overview: FinanceOverview, journal: Journal, taccounts: Reports, positions: Reports, cashflow: Reports, statements: Reports, monthlyreview: PersonalMonthlyReview, legacyreview: MonthlyReview, master: Master, planning: Planning, plans: Planning, balances: RecordedBalances, assets: AssetsLiabilities, livingreview: RecordedLivingReview, livingdata: LivingData, data: Data, settings: Settings };
 function Auth({ fc }) {
   return <div className="auth-layout"><Logo/><div className="auth-copy"><h1>Keep your finances<br/>close. See them clearly.</h1><p>A private, local workspace for your financial records.</p><div className="auth-lines" aria-hidden="true"><span/><span/><span/></div></div><Panel title="Enter your workspace" description="Sign in with your local admin token."><form onSubmit={(event) => {
     event.preventDefault(); const form = event.currentTarget, secret = new FormData(form).get('adminToken');

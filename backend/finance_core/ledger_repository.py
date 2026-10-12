@@ -65,6 +65,21 @@ class LedgerRepository:
         row = self.connection.execute("SELECT * FROM commodities_v2 WHERE code = ?", (code.upper(),)).fetchone()
         return Commodity.model_validate(dict(row)) if row else None
 
+    def commodity_usage(self) -> dict[str, bool]:
+        referenced = PersonalFinanceSnapshot(self.connection).referenced_commodity_codes()
+        return {item.code: item.code in referenced for item in self.list_commodities()}
+
+    def delete_commodity(self, code: str) -> Commodity:
+        with transaction(self.connection):
+            item = self.get_commodity(code)
+            if item is None:
+                raise LookupError('Commodity was not found.')
+            if item.code in PersonalFinanceSnapshot(self.connection).referenced_commodity_codes():
+                raise ValueError('Commodity has history or references. Deactivate it instead of deleting it.')
+            self.connection.execute('DELETE FROM commodities_v2 WHERE code=?', (item.code,))
+            self._invalidate_undo()
+        return item
+
     def save_commodity(self, item: Commodity, *, create: bool) -> Commodity:
         before = self._mutable_snapshot()
         with transaction(self.connection):

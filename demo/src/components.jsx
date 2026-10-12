@@ -7,8 +7,8 @@ export function Logo({ small = false }) {
   return <span className="brand"><img src="/branding/logo.svg" width={small ? 119 : 162} height={small ? 30 : 40} alt="FINCR"/><span>Finance Core<small>Local finance, clearly.</small></span></span>;
 }
 export function Button({ children, primary, danger, ...props }) { return <button className={`${primary ? 'primary' : ''} ${danger ? 'danger' : ''}`} {...props}>{children}</button>; }
-export function MonthPicker({ fc }) {
-  return <Field label="As-of month (balances are month-end observations)"><input type="month" value={selectedMonth(fc.route)} disabled={fc.busy} onChange={event => {
+export function MonthPicker({ fc, label = 'As-of month (balances are month-end observations)', value = selectedMonth(fc.route) }) {
+  return <Field label={label}><input type="month" value={value} disabled={fc.busy} onChange={event => {
     const month = event.target.value;
     if (!month) return;
     const globalView = ['overview', 'master'].includes(fc.route.view);

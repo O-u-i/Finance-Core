@@ -325,8 +325,12 @@ class JournalEntryReversalResponse(WorkspaceLedgerResponse):
     data: JournalEntry
 
 
+class CommodityRead(Commodity):
+    in_use: bool | None = Field(default=None, alias='inUse', description='Included only when includeUsage=true; configuration or retained history references this code.')
+
+
 class CommodityListResponse(WorkspaceLedgerResponse):
-    data: list[Commodity]
+    data: list[CommodityRead]
 
 
 class CommodityMutationResponse(ReversibleWorkspaceLedgerResponse):

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assessSetup, selectedMonth, segmentViews, configurationViews, parseRoute, routeHash, latestCompletedMonth, viewPaths } from '../src/navigation.js';
+import { assessSetup, selectedMonth, selectedRecordedMonth, segmentViews, configurationViews, parseRoute, routeHash, latestCompletedMonth, viewPaths } from '../src/navigation.js';
 const workspace={id:'sandbox',status:'active'};
 const actor={actorKind:'session',status:'active'};
 const currency=code=>({code,kind:'currency',status:'active'});
@@ -39,6 +39,15 @@ test('page controls and API reads use the same as-of month selection',()=>{
  assert.equal(selectedMonth({tab:'ownership'},now),'2026-01');
  assert.equal(selectedMonth({month:'2026-13'},now),'2026-01');
  assert.equal(viewPaths('master','ownership',now,'investment').personalReport,'/reports/personal-balance-sheet?month=2026-01');
+});
+test('dated Living balances default to the current Shanghai month, separately from month-end reports',()=>{
+ const now=new Date('2026-01-31T16:00:00Z');
+ assert.equal(selectedRecordedMonth({},now),'2026-02');
+ assert.equal(selectedRecordedMonth({tab:'2026-07'},now),'2026-07');
+ assert.equal(viewPaths('balances','',now,'living').recordedReport,'/reports/living-recorded-balances?month=2026-02');
+ assert.equal(viewPaths('livingreview','2026-08',now,'living').recordedReport,'/reports/living-recorded-balances?month=2026-08');
+ assert.equal(viewPaths('livingreview','',now,'living').personalReport,'/reports/living-monthly-review?month=2026-02');
+ assert.equal(viewPaths('balances','',now,'living').balanceRecords,'/balance-records');
 });
 test('configuration needs an authenticated session and two usable accounts for one active currency',()=>{
  const input={loaded:true,workspace,actor,commodities:[currency('CNY')],accounts:[account('cash',['CNY']),account('capital',['CNY'])]};

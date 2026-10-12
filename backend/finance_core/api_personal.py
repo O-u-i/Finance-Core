@@ -11,6 +11,7 @@ from finance_core.contracts_v3 import SESSION_SECURITY, STANDARD_ERROR_RESPONSES
 from finance_core.models_personal import (
     ArrangementDraftRequest, CloseRequest, FinancialAccount, FinanceSettings, InvestmentArrangement,
     MonthlyObservation, NonFinancialAsset, Party, PersonalModel, PersonalReportResponse, LegacyMappingRequest, Month,
+    BalanceRecordRequest, RecordedBalance, RecordedBalanceReport,
 )
 from finance_core.personal_finance_repository import PersonalFinanceRepository, RevisionConflict
 
@@ -123,11 +124,25 @@ def create_personal_router() -> APIRouter:
 
     @router.post('/monthly-observations', response_model=DataResponse[MonthlyObservation], status_code=201, openapi_extra=extra)
     def observe(item: MonthlyObservation, request: Request):
+        if item.observed_date:
+            raise HTTPException(422, detail='Use /balance-records for actual-date balances; monthly observations retain their month-end basis.')
         return operation(request, 'record_observation', item)
 
     @router.get('/monthly-closes', response_model=LedgerResponse, openapi_extra=extra)
     def closes(request: Request):
         return operation(request, 'closes')
+
+    @router.get('/balance-records', response_model=DataResponse[list[RecordedBalance]], openapi_extra=extra)
+    def balance_records(request: Request):
+        return operation(request, 'balance_records')
+
+    @router.post('/balance-records', response_model=DataResponse[RecordedBalance], status_code=201, openapi_extra=extra)
+    def balance_record(item: BalanceRecordRequest, request: Request):
+        return operation(request, 'record_balance', item)
+
+    @router.get('/reports/living-recorded-balances', response_model=DataResponse[RecordedBalanceReport], openapi_extra=extra)
+    def recorded_balances(request: Request, month: Month = Query(..., description='Latest actual-date balance within YYYY-MM; missing months remain unknown.')):
+        return operation(request, 'recorded_balance_report', month)
 
     @router.post('/monthly-closes', response_model=LedgerResponse, status_code=201, openapi_extra=extra)
     def close(item: CloseRequest, request: Request):
@@ -166,6 +181,8 @@ def create_personal_router() -> APIRouter:
 
     @router.post('/import/living-monthly', response_model=LedgerResponse, status_code=201, openapi_extra=extra)
     def import_pending(request: Request, items: list[MonthlyObservation] = Body(..., min_length=1, max_length=1000)):
+        if any(item.observed_date for item in items):
+            raise HTTPException(422, detail='Actual-date balances are not legacy monthly imports. Use /balance-records.')
         if any(item.confirmed for item in items):
             raise HTTPException(422, detail='Imported monthly data must remain unconfirmed until individual review.')
         return operation(request, 'record_observations', items)

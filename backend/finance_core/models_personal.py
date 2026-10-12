@@ -1,4 +1,4 @@
-"""Additive API 3.3 contracts. Money is a string, never a JSON float."""
+"""Additive API 3.4 contracts. Money is a string, never a JSON float."""
 from __future__ import annotations
 
 from datetime import date
@@ -31,6 +31,21 @@ def valid_month(value: str) -> str:
 
 
 Month = Annotated[str, BeforeValidator(valid_month), Field(pattern=r'^[0-9]{4}-(0[1-9]|1[0-2])$')]
+
+
+def valid_observed_date(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError('Balance date must be YYYY-MM-DD.')
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError('Balance date must be a real YYYY-MM-DD calendar date.') from error
+    if parsed.isoformat() != value:
+        raise ValueError('Balance date must be YYYY-MM-DD.')
+    return value
+
+
+ObservedDate = Annotated[str, BeforeValidator(valid_observed_date)]
 
 
 class PersonalModel(BaseModel):
@@ -83,7 +98,7 @@ class FinancialAccount(PersonalModel):
     @model_validator(mode='after')
     def shape(self):
         if self.segment == 'living' and (self.balance_source != 'monthly_snapshot' or self.type not in {'asset', 'liability'}):
-            raise ValueError('Living uses monthly asset/liability observations, not Journal postings.')
+            raise ValueError('Living uses recorded asset/liability balances, not Journal postings.')
         if self.segment == 'investment' and self.balance_source != 'ledger':
             raise ValueError('Investment accounts use the ledger.')
         if self.start_month and self.end_month and self.end_month < self.start_month:
@@ -178,6 +193,7 @@ class MonthlyObservation(PersonalModel):
     id: str = Field(min_length=1, max_length=120)
     subject_id: str = Field(alias='subjectId', min_length=1)
     month: Month
+    observed_date: ObservedDate | None = Field(default=None, alias='observedDate')
     kind: Literal['balance', 'valuation', 'transfer']
     currency: str
     amount: Money | None = None
@@ -192,6 +208,8 @@ class MonthlyObservation(PersonalModel):
 
     @model_validator(mode='after')
     def shape(self):
+        if self.observed_date and (self.kind != 'balance' or self.month != self.observed_date[:7]):
+            raise ValueError('Only balances have an actual date; month must match observedDate.')
         if self.kind == 'transfer':
             if self.amount is not None or self.incoming is None or self.outgoing is None or self.subject_id != self.currency:
                 raise ValueError('Transfer totals require subjectId=currency, incoming and outgoing, not amount.')
@@ -203,6 +221,50 @@ class MonthlyObservation(PersonalModel):
         if self.supersedes and not self.reason.strip():
             raise ValueError('Corrections require a reason.')
         return self
+
+
+class BalanceRecordRequest(PersonalModel):
+    id: str = Field(min_length=1, max_length=120)
+    subject_id: str = Field(alias='subjectId', min_length=1)
+    observed_date: ObservedDate = Field(alias='observedDate')
+    currency: str
+    amount: Money
+    confirmed: bool = False
+    source: str = Field(min_length=1, max_length=500)
+    supersedes: str | None = None
+    reason: str = ''
+
+
+class RecordedBalance(MonthlyObservation):
+    observed_date: ObservedDate = Field(alias='observedDate')
+    kind: Literal['balance'] = 'balance'
+    recorded_at: str = Field(alias='recordedAt')
+
+
+class RecordedBalanceSummary(PersonalModel):
+    account_id: str = Field(alias='accountId')
+    code: str
+    name: str
+    type: Literal['asset', 'liability']
+    owner_party_id: str = Field(alias='ownerPartyId')
+    currency: str
+    status: Literal['confirmed', 'pending', 'unknown']
+    latest_record_id: str | None = Field(alias='latestRecordId')
+    observed_date: ObservedDate | None = Field(alias='observedDate')
+    amount: Money | None
+    previous_record_id: str | None = Field(alias='previousRecordId')
+    previous_date: ObservedDate | None = Field(alias='previousDate')
+    previous_amount: Money | None = Field(alias='previousAmount')
+    change: Money | None
+
+
+class RecordedBalanceReport(PersonalModel):
+    schema_version: Literal[1] = Field(alias='schemaVersion')
+    calculation_version: Literal['recorded-balances-v1'] = Field(alias='calculationVersion')
+    month: Month
+    selection_basis: Literal['latest-actual-date-within-month'] = Field(alias='selectionBasis')
+    accounts: list[RecordedBalanceSummary]
+    coverage: dict[str, str | bool]
 
 
 class CloseRequest(PersonalModel):

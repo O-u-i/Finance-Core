@@ -5,7 +5,7 @@ from pathlib import Path
 def test_domain_has_no_transport_persistence_or_consumer_imports():
     root = Path(__file__).resolve().parents[1] / 'finance_core'
     forbidden = {'fastapi', 'sqlite3', 'httpx', 'requests', 'openai', 'ollama', 'frag', 'sfos', 'database', 'ledger_repository', 'registry'}
-    for name in ('domain.py', 'ledger.py', 'models_v2.py', 'models_personal.py', 'personal_finance.py'):
+    for name in ('domain.py', 'ledger.py', 'models_v2.py', 'models_personal.py', 'personal_finance.py', 'recorded_balances.py'):
         tree = ast.parse((root / name).read_text(encoding='utf-8'))
         for node in ast.walk(tree):
             imports = [node.module or ''] if isinstance(node, ast.ImportFrom) else [alias.name for alias in node.names] if isinstance(node, ast.Import) else []

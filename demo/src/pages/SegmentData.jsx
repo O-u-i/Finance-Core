@@ -46,7 +46,7 @@ export function LivingData({ fc }) {
     if (result) { fc.clean('living-csv'); setPreview(null); setInput(''); }
   };
   return <>
-    <Panel title="Import monthly observations" description="CSV only creates pending observations. It never creates Journal entries or confirms balances.">
+    <Panel title="Import legacy monthly observations" description="This importer retains the original month-end basis. Actual-date balances are recorded in Accounts & balances. CSV only creates pending observations, never Journal entries or confirmed balances.">
       <p><code>subjectId,month,kind,currency,amount,incoming,outgoing,source</code></p>
       <fieldset disabled={fc.busy || fc.readonly}>
         <Field label="Monthly CSV file"><input type="file" accept=".csv,text/csv" onChange={readFile}/></Field>

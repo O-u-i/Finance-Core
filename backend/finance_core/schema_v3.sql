@@ -13,6 +13,9 @@ CREATE TABLE investment_arrangements_v3 (
   id TEXT NOT NULL, version INTEGER NOT NULL, payload_json TEXT NOT NULL,
   PRIMARY KEY(id,version)
 ) STRICT;
+-- Balance payloads may include observedDate (actual YYYY-MM-DD); month is its
+-- query bucket, not a month-end claim. Older payloads retain an unknown actual
+-- date. Multiple dated roots are allowed; explicit corrections stay immutable.
 CREATE TABLE monthly_observations_v3 (
   id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, month TEXT NOT NULL,
   kind TEXT NOT NULL CHECK(kind IN ('balance','valuation','transfer')),

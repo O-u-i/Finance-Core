@@ -6,22 +6,28 @@ import Arrangements from './Arrangements.jsx';
 
 export default function Master({ fc }) {
   const [editing, setEditing] = useState(null);
+  const [formVersion, setFormVersion] = useState(0);
   const legacy = !!fc.migrationRequired;
   const items = [['commodities', 'Commodities'], ['accounts', 'Accounts'], ['prices', 'Prices'], ...(!legacy ? [['ownership','Ownership & agreements']] : [])];
   const tab = items.some(([key]) => key === fc.route.tab) ? fc.route.tab : 'commodities';
   React.useEffect(() => { setEditing(null); }, [tab]);
   const commodityOptions = (fc.data.commodities || []).filter((item) => item.status === 'active').map((item) => ({ value: item.code, label: `${item.code} · ${item.name}` }));
-  const deactivate = (resource, item, key) => fc.ledger(`/${resource}/${encodeURIComponent(item[key])}`, { method: 'PUT', body: { ...item, status: 'inactive' } }, 'Record deactivated.');
+  const deactivate = item => fc.ledger(`/commodities/${encodeURIComponent(item.code)}`, { method: 'PUT', body: { code: item.code, name: item.name, kind: item.kind, scale: item.scale, status: 'inactive' } }, 'Commodity deactivated; existing references and history are retained.');
+  const remove = async item => {
+    if (!fc.canLeave() || !confirm(`Delete unused commodity "${item.code}"? Referenced commodities and financial history cannot be deleted.`)) return;
+    const result = await fc.ledger(`/commodities/${encodeURIComponent(item.code)}`, { method: 'DELETE' }, 'Unused commodity deleted.');
+    if (result) { setEditing(null); setFormVersion(value => value + 1); fc.discardChanges(); }
+  };
   const edit = (item) => { if (fc.canLeave()) { setEditing(item); fc.discardChanges(); } };
   return <><Tabs items={items} value={tab} onChange={(value) => fc.navigate('master', value)}/>
     {tab === 'commodities' && <Panel title={editing ? 'Edit commodity' : 'Commodity registry'} description="Currencies, securities and other units used by this ledger." action={editing && <Button onClick={() => { if (fc.canLeave()) { setEditing(null); fc.discardChanges(); } }}>Cancel edit</Button>}>
-      <ResourceForm key={editing?.code || 'new'} fc={fc} immutable={editing ? ['code'] : []} initial={editing || { kind: 'currency', scale: 2 }} fields={[
+      <ResourceForm key={`${editing?.code || 'new'}/${formVersion}`} fc={fc} immutable={editing ? ['code'] : []} initial={editing || { kind: 'currency', scale: 2 }} fields={[
         ['code', 'Code'], ['name', 'Name'], ['kind', 'Kind', 'text', options(['currency', 'security', 'other'])], ['scale', 'Decimal scale', 'number'],
       ]} submitLabel={editing ? 'Save commodity' : 'Add commodity'} onSave={async (values) => {
         const result = await fc.ledger(`/commodities${editing ? '/' + encodeURIComponent(editing.code) : ''}`, { method: editing ? 'PUT' : 'POST', body: { ...values, code: editing?.code || values.code, scale: Number(values.scale), status: editing?.status || 'active' } }, 'Commodity saved.');
         if (result) setEditing(null); return result;
-      }}/><Table rows={fc.data.commodities} columns={[
-        ['code', 'Code'], ['name', 'Name'], ['kind', 'Kind'], ['scale', 'Scale'], ['status', 'Status'], ['actions', 'Actions', (item) => <div className="actions"><Button disabled={fc.busy || fc.readonly} onClick={() => edit(item)}>Edit</Button><Button disabled={fc.busy || fc.readonly || item.status === 'inactive'} onClick={() => deactivate('commodities', item, 'code')}>Deactivate</Button></div>],
+      }}/><p>Delete only unused commodities. Referenced codes can be deactivated; their history remains available.</p><Table caption="Commodity registry" rows={fc.data.commodities} columns={[
+        ['code', 'Code'], ['name', 'Name'], ['kind', 'Kind'], ['scale', 'Scale'], ['status', 'Status'], ['inUse', 'Usage', item => item.inUse === true ? 'Referenced' : item.inUse === false ? 'Unused' : 'Unknown'], ['actions', 'Actions', (item) => <div className="actions"><Button disabled={fc.busy || fc.readonly} onClick={() => edit(item)}>Edit</Button><Button disabled={fc.busy || fc.readonly || item.status === 'inactive'} onClick={() => deactivate(item)}>Deactivate</Button><Button danger disabled={fc.busy || fc.readonly || item.inUse !== false} title={item.inUse !== false ? 'References or financial history must be retained.' : 'Delete this unused registry entry.'} onClick={() => remove(item)}>Delete unused</Button></div>],
       ]}/>
     </Panel>}
     {tab === 'accounts' && <AccountRegistry fc={fc}/> }

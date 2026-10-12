@@ -116,6 +116,7 @@ class LedgerContractRouter(APIRouter):
             ("/commodities", "GET"): CommodityListResponse,
             ("/commodities", "POST"): CommodityMutationResponse,
             ("/commodities/{code}", "PUT"): CommodityMutationResponse,
+            ("/commodities/{code}", "DELETE"): CommodityMutationResponse,
             ("/accounts", "GET"): AccountListResponse,
             ("/accounts", "POST"): AccountMutationResponse,
             ("/accounts/{account_id}", "PUT"): AccountMutationResponse,
@@ -233,8 +234,11 @@ def create_v2_router(
         }
 
     @router.get("/commodities")
-    def list_commodities(request: Request) -> dict[str, Any]:
-        return {"data": [dump(item) for item in repo(request).list_commodities()]}
+    def list_commodities(request: Request, include_usage: bool = Query(False, alias='includeUsage', description='Include read-only reference flags for safe deletion and registry visibility.')) -> dict[str, Any]:
+        ledger = repo(request)
+        usage = ledger.commodity_usage() if include_usage else None
+        return {"data": [{**dump(item), **({'inUse': usage[item.code]} if usage is not None else {})}
+                         for item in ledger.list_commodities()]}
 
     @router.get("/undo/latest")
     def latest_undo(request: Request) -> dict[str, Any]:
@@ -273,6 +277,13 @@ def create_v2_router(
             raise HTTPException(422, detail="Commodity code cannot be changed.")
         try:
             return {"data": dump(repo(request).save_commodity(item, create=False))}
+        except Exception as error:
+            raise translate(error) from error
+
+    @router.delete("/commodities/{code}")
+    def delete_commodity(code: str, request: Request) -> dict[str, Any]:
+        try:
+            return {"data": dump(repo(request).delete_commodity(code))}
         except Exception as error:
             raise translate(error) from error
 
