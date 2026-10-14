@@ -329,6 +329,16 @@ class CommodityRead(Commodity):
     in_use: bool | None = Field(default=None, alias='inUse', description='Included only when includeUsage=true; configuration or retained history references this code.')
 
 
+class OpeningRecords(ContractModel):
+    drafts: list[DraftRecord]
+    entries: list[JournalEntry]
+
+
+class MonthlyActivityReview(MonthlyReview):
+    calculation_version: Literal['monthly-activity-v1'] = Field(alias='calculationVersion')
+    opening_entry_ids: list[str] = Field(alias='openingEntryIds')
+
+
 class CommodityListResponse(WorkspaceLedgerResponse):
     data: list[CommodityRead]
 
@@ -423,6 +433,18 @@ class CashFlowItem(ContractModel):
     commodity_code: str = Field(alias="commodityCode")
     category: Literal["income", "expense", "investment", "financing", "transfer", "other"]
     amount: str
+
+
+class OpeningCashFlow(ContractModel):
+    schema_version: Literal[1] = Field(alias='schemaVersion')
+    calculation_version: Literal['opening-activity-v1'] = Field(alias='calculationVersion')
+    month: str
+    window_start: str = Field(alias='windowStart')
+    window_end_exclusive: str = Field(alias='windowEndExclusive')
+    activity: list[CashFlowItem]
+    opening_effects: list[CashFlowItem] = Field(alias='openingEffects')
+    external_completeness: Literal['unknown'] = Field(alias='externalCompleteness')
+    revision: str
 
 
 class CashFlowResponse(WorkspaceLedgerResponse):

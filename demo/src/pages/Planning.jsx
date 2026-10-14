@@ -19,8 +19,9 @@ export default function Planning({ fc }) {
     {tab === 'snapshots' && <Panel title="Balance snapshots"><SnapshotHistory records={fc.data.snapshots} accounts={fc.data.living} legacy/></Panel>}
     {tab === 'plans' && <Panel title="Monthly plans"><ResourceForm fc={fc} initial={{ amount: '0', category: 'other', dayOfMonth: 1, startDate: localDate() }} fields={[
       ['kind', 'Kind', 'text', options(['income', 'expense'])], ['name', 'Name'], ['amount', 'Amount'], ['commodityCode', 'Currency', 'text', commodityOptions], ['category', 'Category'], ['dayOfMonth', 'Day of month', 'number'], ['startDate', 'Start date', 'date'],
-    ]} submitLabel="Add plan" onSave={(values) => fc.ledger('/monthly-plans', { method: 'POST', body: { ...values, id: id('plan'), recurringMonthly: true, dayOfMonth: Number(values.dayOfMonth), note: '' } }, 'Monthly plan added.')}/>
-      <Table rows={fc.data.plans} columns={[['name', 'Name'], ['kind', 'Kind'], ['amount', 'Amount'], ['commodityCode', 'Currency'], ['dayOfMonth', 'Day'], ['actions', 'Actions', (item) => <Button danger disabled={fc.busy || fc.readonly} onClick={() => { if (confirm('Delete this monthly plan?')) fc.ledger(`/monthly-plans/${encodeURIComponent(item.id)}`, { method: 'DELETE' }, 'Plan deleted.'); }}>Delete</Button>]]}/>
+      ['note', 'Note', 'textarea'],
+    ]} submitLabel="Add plan" onSave={(values) => fc.ledger('/monthly-plans', { method: 'POST', body: { ...values, id: id('plan'), recurringMonthly: true, dayOfMonth: Number(values.dayOfMonth) } }, 'Monthly plan added.')}/>
+      <Table rows={fc.data.plans} columns={[['name', 'Name'], ['kind', 'Kind'], ['amount', 'Amount'], ['commodityCode', 'Currency'], ['dayOfMonth', 'Day'], ['note', 'Note', item => item.note ? <details><summary>Note</summary><p className="note-text">{item.note}</p></details> : '—'], ['actions', 'Actions', (item) => <Button danger disabled={fc.busy || fc.readonly} onClick={() => { if (confirm('Delete this monthly plan?')) fc.ledger(`/monthly-plans/${encodeURIComponent(item.id)}`, { method: 'DELETE' }, 'Plan deleted.'); }}>Delete</Button>]]}/>
     </Panel>}
     {tab === 'summary' && <Panel title="Living & plans summary" description="Backend calculations retain separate currencies."><Summary value={fc.data.world}/></Panel>}
   </>;

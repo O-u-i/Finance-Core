@@ -76,6 +76,7 @@ class FinancialAccount(PersonalModel):
     name: str = Field(min_length=1, max_length=120)
     type: Literal['asset', 'liability', 'equity', 'income', 'expense']
     subtype: str = ''
+    note: str = Field(default='', max_length=4000)
     allowed_commodity_codes: list[str] = Field(alias='allowedCommodityCodes', min_length=1)
     status: Literal['active', 'inactive'] = 'active'
     segment: Literal['investment', 'living']
@@ -203,6 +204,7 @@ class MonthlyObservation(PersonalModel):
     in_transit: Money = Field(default='0', alias='inTransit')
     confirmed: bool = False
     source: str = Field(min_length=1, max_length=500)
+    note: str = Field(default='', max_length=4000)
     supersedes: str | None = None
     reason: str = ''
 
@@ -231,6 +233,7 @@ class BalanceRecordRequest(PersonalModel):
     amount: Money
     confirmed: bool = False
     source: str = Field(min_length=1, max_length=500)
+    note: str = Field(default='', max_length=4000)
     supersedes: str | None = None
     reason: str = ''
 

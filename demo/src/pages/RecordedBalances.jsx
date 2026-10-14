@@ -8,27 +8,29 @@ import { PersonalMonthlyReview, PersonalOverview } from './PersonalFinance.jsx';
 const codeOrder = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
 const livingAccounts = fc => (fc.data.financialAccounts || []).filter(item => item.segment === 'living').sort((a, b) => codeOrder.compare(a.code, b.code));
 
-function BalanceForm({ fc, accounts }) {
+export function BalanceForm({ fc, accounts, opening = false }) {
   const [subjectId, setSubject] = useState(accounts[0]?.id || '');
   const [observedDate, setDate] = useState(shanghaiDate());
   const [amount, setAmount] = useState(''), [source, setSource] = useState('');
+  const [note, setNote] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const month = observedDate.slice(0, 7);
   const available = accounts.filter(item => (!item.startMonth || month >= item.startMonth) && (!item.endMonth || month <= item.endMonth) && (item.status === 'active' || item.endMonth));
   const account = available.find(item => item.id === subjectId) || available[0];
   return <form className="resource-form recorded-balance-form" onChangeCapture={event => fc.markDirty(event.currentTarget)} onSubmit={async event => {
     event.preventDefault(); const form = event.currentTarget;
-    const result = await fc.ledger('/balance-records', { method: 'POST', body: {
-      id: id('balance'), subjectId: account.id, observedDate, amount, currency: account.allowedCommodityCodes[0], source, confirmed: true,
-    } }, 'Balance recorded on its actual date. Earlier records are retained.');
-    if (result) { fc.clean(form); setConfirmed(false); setAmount(''); }
+    const result = await fc.ledger(opening ? '/opening-living-balances' : '/balance-records', { method: 'POST', body: {
+      id: id('balance'), subjectId: account.id, observedDate, amount, currency: account.allowedCommodityCodes[0], source, note, confirmed: true,
+    } }, 'Balance recorded on its actual date. Earlier records are retained; no Journal entry was created.');
+    if (result) { fc.clean(form); setConfirmed(false); setAmount(''); setNote(''); }
   }}><fieldset disabled={fc.busy || fc.readonly}><div className="form-grid">
     <Select name="subjectId" label="Account" value={account?.id || ''} onChange={value => { setSubject(value); setAmount(''); setConfirmed(false); }} options={available.map(item => ({ value: item.id, label: `${item.code} · ${item.name}` }))}/>
     <Field label="Balance date"><input name="observedDate" type="date" required max={shanghaiDate()} value={observedDate} onChange={event => { setDate(event.target.value); setConfirmed(false); }}/></Field>
     <Field label={`Observed balance · ${account?.allowedCommodityCodes[0] || ''}`}><input name="amount" inputMode="decimal" required value={amount} onChange={event => { setAmount(event.target.value); setConfirmed(false); }}/></Field>
     <Field label="Statement / observation source"><input name="source" required maxLength={500} value={source} onChange={event => { setSource(event.target.value); setConfirmed(false); }}/></Field>
+    <Field label="Note"><textarea name="note" rows={2} maxLength={4000} value={note} onChange={event => { setNote(event.target.value); setConfirmed(false); }}/></Field>
   </div>{!account && <p role="status">No accounts are available for this balance date. Check the account purpose period in Master data.</p>}<div className="actions"><label className="balance-confirmation"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)}/> I observed this balance on {observedDate || 'the selected date'}.</label>
-    <Button type="submit" primary disabled={!confirmed || !account}>Record balance</Button>
+    <Button type="submit" primary disabled={!confirmed || !account}>{opening ? 'Record opening balance' : 'Record balance'}</Button>
   </div></fieldset></form>;
 }
 

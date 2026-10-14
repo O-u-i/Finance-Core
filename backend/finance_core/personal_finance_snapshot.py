@@ -16,6 +16,7 @@ from finance_core.models_personal import (
 )
 from finance_core.personal_finance import calculate_report, effective_date, month_end
 from finance_core.schema_migration import canonical, fingerprint, rows
+from finance_core.opening_balances import EQUITY_TAG
 
 
 class RevisionConflict(ValueError):
@@ -114,10 +115,13 @@ class PersonalFinanceSnapshot:
 
         def references(value):
             if isinstance(value, list):
-                return any(references(item) for item in value)
+                return EQUITY_TAG + account_id in value or any(references(item) for item in value)
             if isinstance(value, dict):
                 return any((key in keys and item == account_id) or references(item) for key, item in value.items())
             return False
+
+        if any(references(json.loads(row['tags_json'])) for row in rows(self.connection, 'journal_entries_v2')):
+            return True
 
         for table, columns in [('journal_drafts_v2', ('payload_json',)), ('recurring_entry_rules_v2', ('payload_json',)),
                                ('financial_accounts_v3', ('payload_json',)), ('non_financial_assets_v3', ('payload_json',)),

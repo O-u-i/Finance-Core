@@ -34,8 +34,10 @@ export function useFinance() {
   const bootstrap = useCallback(async ({ fresh = false } = {}) => {
     const ticket = gate.read(); if (!workspaceRef.current) setSession('connecting'); setNotice(null);
     try {
-      const healthResult = await client.request('/api/v3/health', { signal: ticket.signal });
-      const me = await client.request('/api/v3/me', { signal: ticket.signal });
+      const [healthResult, me] = await Promise.all([
+        client.request('/api/v3/health', { signal: ticket.signal }),
+        client.request('/api/v3/me', { signal: ticket.signal }),
+      ]);
       const result = await client.request('/api/v3/workspaces', { signal: ticket.signal });
       if (!ticket.current()) return;
       if (fresh) setSessionOrigin('signed-in');

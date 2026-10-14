@@ -74,6 +74,7 @@ def test_monthly_summary_contract_rejects_extra_missing_or_unsafe_fields(monkeyp
 def test_previous_protocol2_archive_is_unchanged():
     assert sha256((ROOT / "docs/release/finance-core-frag-plugin-v1.1.0.zip").read_bytes()) == "a96d5d2c4c8e4c8a7232db4be825925d37fb80052e74f6eab450744c62ccfacb"
     assert sha256((ROOT / "docs/release/finance-core-frag-plugin-v1.2.0.zip").read_bytes()) == "9d4f66b101183b19d5e50d807386c276cc77937517a6f7d59be813971ccd1ee6"
+    assert sha256((ROOT / "docs/release/finance-core-frag-plugin-v1.4.0.zip").read_bytes()) == "f95049d6b411131b56612f0b40b3105f90e0cac7c528a0a01faa412fd3514ba3"
 
 
 def configured(monkeypatch: pytest.MonkeyPatch, *, records: dict | None = None) -> None:
@@ -83,7 +84,7 @@ def configured(monkeypatch: pytest.MonkeyPatch, *, records: dict | None = None) 
     monkeypatch.setenv("FINANCE_CORE_PLUGIN_RECORDS_JSON", json.dumps(records or {WORKSPACE: [ENTRY, DRAFT]}))
 
 
-def fake_fc(monkeypatch: pytest.MonkeyPatch, *, version: str = "3.4.0", available: bool = True, report: dict | None = None):
+def fake_fc(monkeypatch: pytest.MonkeyPatch, *, version: str = "3.5.0", available: bool = True, report: dict | None = None):
     seen: list[str] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -140,11 +141,11 @@ def test_archive_integrity_and_exact_contract():
         manifest = json.loads(package.read("manifest.json"))
         assert manifest == expected_manifest()
         assert manifest["protocolVersion"] == 2
-        assert manifest["version"] == "1.4.0"
+        assert manifest["version"] == "1.5.0"
         assert manifest["minHostVersion"] == "1.12.1"
         assert manifest["name"] == "Finance Core"
         assert manifest["capabilities"] == ["evidence.read"]
-        assert manifest["fcApiVersion"] == "3.4.0"
+        assert manifest["fcApiVersion"] == "3.5.0"
     assert "synthetic-read-token" not in (SOURCE / "ui.js").read_text(encoding="utf-8")
     assert "FINANCE_CORE_PLUGIN_READ_TOKEN" not in (SOURCE / "ui.js").read_text(encoding="utf-8")
 

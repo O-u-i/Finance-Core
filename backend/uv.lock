@@ -81,7 +81,7 @@ wheels = [
 
 [[package]]
 name = "finance-core"
-version = "3.5.0"
+version = "3.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

@@ -27,6 +27,7 @@ function HistoryRows({ records, columns }) {
       {item.source && <><dt>Source</dt><dd>{item.source}</dd></>}
       {item.supersedes && <><dt>Corrects</dt><dd>{item.supersedes}</dd></>}
       {item.reason && <><dt>Reason</dt><dd>{item.reason}</dd></>}
+      {item.note && <><dt>Note</dt><dd className="note-text">{item.note}</dd></>}
     </dl></details>],
   ]}/><Pager page={page} pages={pages} onChange={setPage}/></>;
 }

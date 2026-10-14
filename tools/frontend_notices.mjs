@@ -20,8 +20,10 @@ if (process.argv.includes('--check')) {
     }
   };
   inspect(root);
-  const bundle = readFileSync(join(root, 'assets/app.js'), 'utf8');
-  if (bundle.includes('/api/v2') || bundle.includes('localStorage') || bundle.includes('sessionStorage')) throw new Error('Legacy route or browser storage in runtime.');
+  for (const name of readdirSync(join(root, 'assets')).filter(name => name.endsWith('.js'))) {
+    const bundle = readFileSync(join(root, 'assets', name), 'utf8');
+    if (bundle.includes('/api/v2') || bundle.includes('localStorage') || bundle.includes('sessionStorage')) throw new Error(`Legacy route or browser storage in runtime chunk: ${name}`);
+  }
   console.log('Frontend distribution: pinned MIT notices present; no legacy routes, browser storage or font/data/rule assets.');
 } else {
   writeFileSync('public/THIRD-PARTY-NOTICES.txt', notice, 'utf8');

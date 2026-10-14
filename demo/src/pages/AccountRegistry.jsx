@@ -26,7 +26,7 @@ function AccountForm({ fc, editing, onSaved, segment, setSegment }) {
       }
       path = legacy ? '/accounts' : '/financial-accounts';
       body = { id: initial.id || id('account'), code: values.code, name: values.name, type: values.type, subtype: values.subtype, allowedCommodityCodes: allowed, status: initial.status || 'active' };
-      if (!legacy) Object.assign(body, { segment, balanceSource: segment === 'living' ? 'monthly_snapshot' : 'ledger', classificationConfirmed: true,
+      if (!legacy) Object.assign(body, { segment, note: values.note, balanceSource: segment === 'living' ? 'monthly_snapshot' : 'ledger', classificationConfirmed: true,
         ownerPartyId: segment === 'living' ? values.ownerPartyId : null,
         ...Object.fromEntries(['startMonth', 'endMonth', 'successorOf', 'legacyLivingId'].map(key => [key, values[key] || null])) });
     }
@@ -44,6 +44,7 @@ function AccountForm({ fc, editing, onSaved, segment, setSegment }) {
       {segment === 'living' ? <Select key="currency" label="Currency" name="currency" defaultValue={initial.commodityCode || initial.allowedCommodityCodes?.[0]} options={currencies}/> : <Field key="commodities" label="Allowed commodity codes (comma separated)"><input name="commodityCodes" defaultValue={initial.allowedCommodityCodes?.join(', ') || currencies[0]?.value || ''} required/></Field>}
       {!legacy && segment === 'living' && <Select label="Beneficiary (register in Ownership first)" name="ownerPartyId" defaultValue={initial.ownerPartyId || ''} options={[{ value: '', label: 'Choose beneficiary' }, ...(fc.data.parties || []).map(item => ({ value: item.id, label: item.name }))]}/>}
       {legacyLiving && <><Field label={editing ? 'Current recorded balance (record changes in Living)' : 'Initial recorded balance'}><input name="balance" inputMode="decimal" defaultValue={initial.balance || '0'} readOnly={!!editing} required/></Field><Field label="Note"><input name="note" defaultValue={initial.note || ''}/></Field></>}
+      {!legacy && <Field label="Note"><textarea name="note" rows={2} maxLength={4000} defaultValue={initial.note || ''}/></Field>}
     </div>
     {!legacy && <details className="account-advanced"><summary>Dates, successor & legacy mapping</summary><div className="form-grid">
       {['startMonth', 'endMonth'].map(name => <Field key={name} label={name === 'startMonth' ? 'Start month (optional)' : 'End month (optional)'}><input name={name} type="month" defaultValue={initial[name] || ''}/></Field>)}

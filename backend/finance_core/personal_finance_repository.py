@@ -57,10 +57,15 @@ class PersonalFinanceRepository:
     def balance_records(self) -> list[dict]:
         return [value for value in self.snapshot.observations() if value.get('observedDate')]
 
-    def record_balance(self, item: BalanceRecordRequest) -> dict:
+    def record_balance(self, item: BalanceRecordRequest, *, opening: bool = False) -> dict:
         observation = MonthlyObservation.model_validate({**dump(item), 'kind': 'balance',
                                                        'month': item.observed_date[:7]})
-        self.record_observation(observation)
+        with transaction(self.connection):
+            if opening:
+                existing = [record for record in self.balance_records() if record['subjectId'] == item.subject_id]
+                if item.supersedes or (existing and item.observed_date >= min(record['observedDate'] for record in existing)):
+                    raise ValueError('Living opening must precede existing actual-date records. Use ordinary balances or their explicit correction instead.')
+            self._record_observation(observation)
         return next(value for value in self.balance_records() if value['id'] == item.id)
 
     def recorded_balance_report(self, month: str) -> dict:
@@ -412,7 +417,7 @@ class PersonalFinanceRepository:
     def export_segment_csv(self, segment: str) -> str:
         output = io.StringIO(newline='')
         if segment == 'living':
-            fields = ['id','subjectId','month','kind','currency','amount','incoming','outgoing','fees','inTransit','confirmed','source','supersedes','reason','recordedAt','observedDate']
+            fields = ['id','subjectId','month','kind','currency','amount','incoming','outgoing','fees','inTransit','confirmed','source','supersedes','reason','recordedAt','observedDate','note']
             values = self.snapshot.observations()
         else:
             fields = ['entryId','date','description','balancingCommodityCode','postingId','accountId','side','units','commodityCode','valuationRate','rateType','memo','tags','lotAction','lotId','lotAllocationsJson']

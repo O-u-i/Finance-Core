@@ -343,6 +343,13 @@ class LedgerRepository:
         timestamp = now_iso()
         before = self._mutable_snapshot()
         with transaction(self.connection):
+            from finance_core.opening_balances import opening_date
+            stored = self.get_draft(draft_id)
+            if stored and stored['status'] == 'draft' and opening_date(stored['draft']):
+                old_tags = {tag for tag in stored['draft']['tags'] if tag.startswith('fc:opening-')}
+                new_tags = {tag for tag in draft.tags if tag.startswith('fc:opening-')}
+                if old_tags != new_tags:
+                    raise ValueError('Opening classification cannot change silently. Delete an unposted draft before explicitly starting a different workflow.')
             result = self.connection.execute(
                 "UPDATE journal_drafts_v2 SET payload_json=?,updated_at=? WHERE id=? AND status='draft'",
                 (json.dumps(dump(draft), ensure_ascii=False, separators=(",", ":")), timestamp, draft_id),
@@ -366,6 +373,17 @@ class LedgerRepository:
         commodities = {item.code: item for item in self.list_commodities()}
         accounts = {item.id: item for item in self.list_accounts()}
         completed, issues = complete_entry(draft, commodities, accounts)
+        from finance_core.opening_balances import OPENING_TAG, validate_opening
+        try:
+            if any(tag.startswith('fc:opening-') for tag in draft.tags):
+                history = self.list_entries()
+            else:
+                ids = self.connection.execute('SELECT id FROM journal_entries_v2 WHERE instr(tags_json,?)>0', (OPENING_TAG,))
+                history = [self.get_entry(row[0]) for row in ids]
+            validate_opening(draft, accounts, commodities, history)
+        except ValueError as error:
+            issues.append(ValidationIssue(code='INVALID_OPENING_BASELINE', severity='error', path='tags', message=str(error)))
+            return None, issues
         if self.connection.execute("SELECT 1 FROM sqlite_master WHERE name='arrangement_drafts_v3'").fetchone():
             try:
                 PersonalFinanceSnapshot(self.connection).validate_generated_draft(draft)
@@ -378,13 +396,15 @@ class LedgerRepository:
                 return None, issues
         return completed, issues
 
-    def post_draft(self, draft_id: str) -> dict[str, Any]:
+    def post_draft(self, draft_id: str, *, expected_updated_at: str | None = None) -> dict[str, Any]:
         with transaction(self.connection):
             # Reserve the writer before reading/validating the draft and entitlement
             # revision. Validation and posting must see the same finance facts.
             stored = self.get_draft(draft_id)
             if stored is None or stored["status"] != "draft":
                 raise LookupError("Draft was not found or is already posted.")
+            if expected_updated_at is not None and stored['updatedAt'] != expected_updated_at:
+                raise ValueError('Opening draft changed after review. Reload and confirm its current version before posting.')
             draft = JournalEntryDraft.model_validate(stored["draft"])
             completed, issues = self.validate_draft(draft)
             if completed is None:
@@ -678,6 +698,9 @@ class LedgerRepository:
         with transaction(self.connection):
             before = self._mutable_snapshot()
             counts = ledger_backup.restore_backup(self.connection, backup)
+            from finance_core.opening_balances import validate_opening_history
+            validate_opening_history(self.list_entries(), self.list_drafts(include_posted=True),
+                                     {a.id: a for a in self.list_accounts()}, {c.code: c for c in self.list_commodities()})
             if backup['formatVersion'] == 2:
                 self._save_undo(before)
             else:

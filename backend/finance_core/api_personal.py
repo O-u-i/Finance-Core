@@ -8,6 +8,9 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Res
 from finance_core.api_v2 import repo, translate
 from finance_core.api_v3 import require_admin, workspace_context
 from finance_core.contracts_v3 import SESSION_SECURITY, STANDARD_ERROR_RESPONSES, LedgerResponse
+from finance_core.contracts_v3 import DraftRecord, JournalEntry, MonthlyActivityReview, OpeningCashFlow, OpeningRecords
+from finance_core.opening_balances import OpeningBalanceRequest, OpeningBalancePostRequest
+from finance_core.opening_balance_operations import OpeningBalanceOperations
 from finance_core.models_personal import (
     ArrangementDraftRequest, CloseRequest, FinancialAccount, FinanceSettings, InvestmentArrangement,
     MonthlyObservation, NonFinancialAsset, Party, PersonalModel, PersonalReportResponse, LegacyMappingRequest, Month,
@@ -47,6 +50,48 @@ def create_personal_router() -> APIRouter:
                        dependencies=[Depends(require_admin), Depends(workspace_context, scope='function')],
                        responses=STANDARD_ERROR_RESPONSES)
     extra = {'security': SESSION_SECURITY, 'x-fc-required-actor': 'owner-session'}
+
+    @router.post('/opening-balance-drafts', response_model=DataResponse[DraftRecord], status_code=201, openapi_extra=extra)
+    def opening_draft(item: OpeningBalanceRequest, request: Request):
+        try:
+            return {'data': OpeningBalanceOperations(repo(request)).create_draft(item), 'workspaceId': request.state.workspace_id}
+        except Exception as error:
+            raise translate(error) from error
+
+    @router.get('/opening-balances', response_model=DataResponse[OpeningRecords], openapi_extra=extra)
+    def opening_records(request: Request):
+        try:
+            return {'data': OpeningBalanceOperations(repo(request)).records(), 'workspaceId': request.state.workspace_id}
+        except Exception as error:
+            raise translate(error) from error
+
+    @router.post('/opening-balances/{draft_id}/post', response_model=DataResponse[JournalEntry], openapi_extra=extra)
+    def post_opening(draft_id: str, item: OpeningBalancePostRequest, request: Request):
+        try:
+            return {'data': OpeningBalanceOperations(repo(request)).post(draft_id, item), 'workspaceId': request.state.workspace_id}
+        except Exception as error:
+            raise translate(error) from error
+
+    @router.post('/opening-living-balances', response_model=DataResponse[RecordedBalance], status_code=201, openapi_extra=extra)
+    def opening_living(item: BalanceRecordRequest, request: Request):
+        try:
+            return {'data': OpeningBalanceOperations(repo(request)).record_living(item), 'workspaceId': request.state.workspace_id}
+        except Exception as error:
+            raise translate(error) from error
+
+    @router.get('/reports/activity-cash-flow', response_model=DataResponse[OpeningCashFlow], openapi_extra=extra)
+    def activity_cash_flow(request: Request, month: str = Query(pattern=r'^\d{4}-(0[1-9]|1[0-2])$')):
+        try:
+            return {'data': OpeningBalanceOperations(repo(request)).cash_flow(month), 'workspaceId': request.state.workspace_id}
+        except Exception as error:
+            raise translate(error) from error
+
+    @router.get('/reports/monthly-activity-review', response_model=DataResponse[MonthlyActivityReview], openapi_extra=extra)
+    def monthly_activity(request: Request, month: str = Query(pattern=r'^\d{4}-(0[1-9]|1[0-2])$')):
+        try:
+            return {'data': OpeningBalanceOperations(repo(request)).monthly_activity(month), 'workspaceId': request.state.workspace_id}
+        except Exception as error:
+            raise translate(error) from error
 
     @router.get('/financial-accounts', response_model=DataResponse[list[FinancialAccount]], openapi_extra=extra)
     def accounts(request: Request):

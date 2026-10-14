@@ -30,7 +30,7 @@ def month_window(month: str) -> tuple[list[str], str, str]:
     return months, months[0] + "-01", next_month
 
 
-def monthly_review(month: str, entries: list[dict], postings: list[dict]) -> dict:
+def monthly_review(month: str, entries: list[dict], postings: list[dict], *, exclude_entry_ids: set[str] | None = None) -> dict:
     months, start, end = month_window(month)
     invalid, selected = [], []
     for entry in entries:
@@ -41,7 +41,7 @@ def monthly_review(month: str, entries: list[dict], postings: list[dict]) -> dic
         except (ValueError, TypeError):
             invalid.append(entry)
             continue
-        if start <= value < end:
+        if start <= value < end and entry['id'] not in (exclude_entry_ids or set()):
             selected.append(entry)
     report = {"schemaVersion": 1, "calculationVersion": CALCULATION_VERSION,
         "month": month, "windowStart": start, "windowEndExclusive": end,

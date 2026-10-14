@@ -3,12 +3,13 @@ import { id } from '../api.js';
 import AccountRegistry from './AccountRegistry.jsx';
 import { Button, Panel, ResourceForm, Table, Tabs, options } from '../components.jsx';
 import Arrangements from './Arrangements.jsx';
+import OpeningBalances from './OpeningBalances.jsx';
 
 export default function Master({ fc }) {
   const [editing, setEditing] = useState(null);
   const [formVersion, setFormVersion] = useState(0);
   const legacy = !!fc.migrationRequired;
-  const items = [['commodities', 'Commodities'], ['accounts', 'Accounts'], ['prices', 'Prices'], ...(!legacy ? [['ownership','Ownership & agreements']] : [])];
+  const items = [['commodities', 'Commodities'], ['accounts', 'Accounts'], ['prices', 'Prices'], ...(!legacy ? [['opening','Opening balances'], ['ownership','Ownership & agreements']] : [])];
   const tab = items.some(([key]) => key === fc.route.tab) ? fc.route.tab : 'commodities';
   React.useEffect(() => { setEditing(null); }, [tab]);
   const commodityOptions = (fc.data.commodities || []).filter((item) => item.status === 'active').map((item) => ({ value: item.code, label: `${item.code} · ${item.name}` }));
@@ -32,6 +33,7 @@ export default function Master({ fc }) {
     </Panel>}
     {tab === 'accounts' && <AccountRegistry fc={fc}/> }
     {tab === 'ownership' && <Arrangements fc={fc}/>}
+    {tab === 'opening' && <OpeningBalances fc={fc}/>}
     {tab === 'prices' && <Panel title="Explicit prices" description="Record prices deliberately. Finance Core does not connect to live markets.">
       <ResourceForm fc={fc} initial={{ source: 'manual' }} fields={[
         ['commodityCode', 'Commodity', 'text', commodityOptions], ['quoteCommodityCode', 'Quote commodity', 'text', commodityOptions], ['price', 'Price'], ['asOf', 'As of', 'datetime-local'], ['source', 'Source'],

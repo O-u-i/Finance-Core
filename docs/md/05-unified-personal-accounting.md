@@ -1,6 +1,6 @@
-# Unified personal and investment accounting (3.5.0)
+# Unified personal and investment accounting (3.6.0)
 
-Product 3.5.0 / API 3.4.0 / ledger schema 3 / registry schema 1.
+Product 3.6.0 / API 3.5.0 / ledger schema 3 / registry schema 1.
 This is an additive local implementation, not a production migration or publication.
 
 ## Measurement and ownership
@@ -304,9 +304,11 @@ All browser scripts require owned
 synthetic fixtures and a synthetic-server marker before authentication; they are
 not scripts for the currently running personal Vault.
 
-The authorized official reader 1.4.0 / protocol 2 pins API 3.4.0 exactly. Its source
+The authorized official reader 1.5.0 / protocol 2 pins API 3.5.0 exactly. Its source
 and new local archive are verified without changing the read whitelist. Earlier
 reader archives remain unchanged; reader 1.3.0 still rejects API 3.4.0. FRAG and its
 installed pins are untouched and need a separately reviewed synchronization. FRAG remains restricted
 to its explicitly authorized legacy report IDs; no new personal-report whitelist,
 financial calculation or recommendation runtime is added.
+
+Opening workflows, optional Notes and compatible activity-report semantics are documented in [Opening balances and Notes](06-opening-balances-and-notes.md). Reader 1.4.0 remains a historical API 3.4.0 artifact; the new 1.5.0 archive does not expand access or change Monthly Review v1.

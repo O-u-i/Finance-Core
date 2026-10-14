@@ -1,4 +1,4 @@
-"""Optional FRAG protocol 2 adapter for Finance Core API 3.4.0.
+"""Optional FRAG protocol 2 adapter for Finance Core API 3.5.0.
 
 The legacy read hook remains available. FRAG loads this module; FC does not.
 """
@@ -15,7 +15,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 
 PREFIX = "/api/plugins/finance-core"
-API_VERSION = "3.4.0"
+API_VERSION = "3.5.0"
 RECORD_ID = re.compile(r"^(?:(entry|draft):([A-Za-z0-9][A-Za-z0-9._-]{0,127})|monthly-review:([0-9]{4}-(?:0[1-9]|1[0-2])))$")
 WORKSPACE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 MAX_RECORDS = 10
@@ -92,7 +92,7 @@ def _check_health(client: httpx.Client) -> None:
     health = _get(client, "/api/v3/health")
     if (health.get("status") != "ok" or health.get("service") != "finance-core"
             or health.get("apiVersion") != API_VERSION):
-        raise FcIncompatible("Finance Core API 3.4.0 is required.")
+        raise FcIncompatible("Finance Core API 3.5.0 is required.")
 
 
 def _workspaces(client: httpx.Client) -> dict[str, dict]:

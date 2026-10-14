@@ -1,19 +1,24 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useFinance, views } from './state.jsx';
 import { segmentViews, configurationViews } from './navigation.js';
-import Setup from './pages/Setup.jsx';
 import { SERVICE_VERSION } from './api.js';
 import { Button, Field, Logo, Panel, Select, StepContent } from './components.jsx';
-import { Reports } from './pages/Dashboard.jsx';
-import Journal from './pages/Journal.jsx';
-import Master from './pages/Master.jsx';
-import Planning from './pages/Planning.jsx';
-import Data from './pages/Data.jsx';
-import Settings from './pages/Settings.jsx';
-import MonthlyReview from './pages/MonthlyReview.jsx';
-import { AssetsLiabilities, PersonalMonthlyReview } from './pages/PersonalFinance.jsx';
-import { FinanceOverview, RecordedBalances, RecordedLivingReview } from './pages/RecordedBalances.jsx';
-import { LivingData } from './pages/SegmentData.jsx';
+// Authentication does not need to download or transform Workspace forms and CSV tooling.
+const named = (load, name) => lazy(() => load().then(module => ({ default: module[name] })));
+const Setup = lazy(() => import('./pages/Setup.jsx'));
+const Journal = lazy(() => import('./pages/Journal.jsx'));
+const Master = lazy(() => import('./pages/Master.jsx'));
+const Planning = lazy(() => import('./pages/Planning.jsx'));
+const Data = lazy(() => import('./pages/Data.jsx'));
+const Settings = lazy(() => import('./pages/Settings.jsx'));
+const MonthlyReview = lazy(() => import('./pages/MonthlyReview.jsx'));
+const Reports = named(() => import('./pages/Dashboard.jsx'), 'Reports');
+const AssetsLiabilities = named(() => import('./pages/PersonalFinance.jsx'), 'AssetsLiabilities');
+const PersonalMonthlyReview = named(() => import('./pages/PersonalFinance.jsx'), 'PersonalMonthlyReview');
+const FinanceOverview = named(() => import('./pages/RecordedBalances.jsx'), 'FinanceOverview');
+const RecordedBalances = named(() => import('./pages/RecordedBalances.jsx'), 'RecordedBalances');
+const RecordedLivingReview = named(() => import('./pages/RecordedBalances.jsx'), 'RecordedLivingReview');
+const LivingData = named(() => import('./pages/SegmentData.jsx'), 'LivingData');
 
 const pages = { overview: FinanceOverview, journal: Journal, taccounts: Reports, positions: Reports, cashflow: Reports, statements: Reports, monthlyreview: PersonalMonthlyReview, legacyreview: MonthlyReview, master: Master, planning: Planning, plans: Planning, balances: RecordedBalances, assets: AssetsLiabilities, livingreview: RecordedLivingReview, livingdata: LivingData, data: Data, settings: Settings };
 function Auth({ fc }) {
@@ -52,9 +57,8 @@ export default function App() {
   const blocked = !fc.setup.ready && !configurationViews.includes(fc.route.view);
   return <><a href="#main-content" className="skip-link" onClick={(e) => { e.preventDefault(); document.querySelector('#main-content')?.focus(); }}>Skip to content</a>
     {fc.notice && <div className={`global-notice notice ${fc.notice.error ? 'error' : 'success'}`} role={fc.notice.error ? 'alert' : 'status'}><span>{fc.notice.text}</span><Button aria-label="Dismiss notification" onClick={() => fc.setNotice(null)}>×</Button></div>}
-    {fc.session === 'connecting' && <div className="connection-state"><Logo/><h1>Connecting to Finance Core</h1><p role="status">Checking your local session…</p></div>}
     {fc.session === 'unavailable' && <div className="connection-state"><Logo/><h1>Finance Core is unavailable</h1><p>Start the local backend and try again.</p><Button primary onClick={fc.bootstrap}>Retry connection</Button><Button disabled={fc.busy} onClick={fc.signOut}>Forget saved sign-in</Button></div>}
-    {fc.session === 'login' && <Auth fc={fc}/>}
+    {['connecting', 'login'].includes(fc.session) && <Auth fc={fc}/>}
     {fc.session === 'wizard' && <Wizard fc={fc}/>}
     {fc.session === 'ready' && fc.workspace && <div className="app-shell">
       <header className="app-header"><div className="identity-row"><a className="brand-link" href="#/overview" onClick={(e) => { e.preventDefault(); fc.navigate('overview'); }}><Logo/></a><div className="session-tools"><span className="session-label">Owner session<small>{fc.sessionOrigin === 'restored' ? 'Restored from this browser' : 'Signed in with your admin token'}</small></span><Button disabled={fc.busy} onClick={fc.signOut}>Sign out</Button></div></div>
@@ -67,7 +71,7 @@ export default function App() {
         {fc.route.view !== 'overview' && <div className="page-heading"><div><p>{fc.workspace.displayName}</p><h1>{views[fc.route.view][0]}</h1></div><span className="badge">{fc.workspace.status === 'archived' ? 'Read only' : 'Workspace scoped'}</span></div>}
         {fc.readonly && <p className="notice">Archived workspace · records are read-only. Restore it in Settings to make changes.</p>}
         {(fc.busy || fc.loading) && <div className="loading-line" role="status">{fc.busy ? 'Applying operation…' : 'Loading records…'}</div>}
-        <div inert={fc.loading || undefined}><StepContent className="page-content" step={`${fc.route.view}/${fc.route.tab}`}><React.Fragment key={`${fc.route.view}/${fc.route.tab}/${blocked}`} >{blocked ? <Setup fc={fc}/> : <Page fc={fc}/>}</React.Fragment></StepContent></div>
+        <div inert={fc.loading || undefined}><StepContent className="page-content" step={`${fc.route.view}/${fc.route.tab}`}><React.Fragment key={`${fc.route.view}/${fc.route.tab}/${blocked}`} ><Suspense fallback={<p className="loading-line" role="status">Loading page…</p>}>{blocked ? <Setup fc={fc}/> : <Page fc={fc}/>}</Suspense></React.Fragment></StepContent></div>
       </main>
       <aside className="about-strip"><h2>Finance you can trace.</h2><p>A local ledger, explicit values and a history that stays intact.</p><Button onClick={() => fc.navigate('settings')}>About Finance Core</Button></aside>
       <footer><span>Finance Core {SERVICE_VERSION}</span><span>Local first · Deterministic · Private by design</span></footer>

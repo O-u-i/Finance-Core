@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   build: {
-    outDir: 'dist/v3.5.0',
+    outDir: 'dist/v3.6.0',
     emptyOutDir: false,
     modulePreload: false,
     rollupOptions: {

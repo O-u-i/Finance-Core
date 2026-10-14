@@ -1,6 +1,6 @@
-# Optional Finance Core reader for FRAG-harness (v1.4.0)
+# Optional Finance Core reader for FRAG-harness (v1.5.0)
 
-Finance Core product 3.5.0 runs independently with API 3.4.0, ledger schema 3 and registry schema 1. Its optional protocol-2 reader exposes explicitly selected financial evidence; FC owns all calculations, authentication, storage and writes. FRAG owns authorization, bounded tool packs and reviewed Memory, not a finance runtime.
+Finance Core product 3.6.0 runs independently with API 3.5.0, ledger schema 3 and registry schema 1. Its optional protocol-2 reader exposes explicitly selected financial evidence; FC owns all calculations, authentication, storage and writes. FRAG owns authorization, bounded tool packs and reviewed Memory, not a finance runtime.
 
 ## Compatibility and artifact
 
@@ -8,14 +8,14 @@ Finance Core product 3.5.0 runs independently with API 3.4.0, ledger schema 3 an
 | --- | --- |
 | FRAG plugin protocol | 2 |
 | FRAG host | 1.12.1 or later |
-| FC API | 3.4.0 |
-| Reader version | 1.4.0 |
+| FC API | 3.5.0 |
+| Reader version | 1.5.0 |
 | Capability | `evidence.read` |
-| Archive | `docs/release/finance-core-frag-plugin-v1.4.0.zip` |
+| Archive | `docs/release/finance-core-frag-plugin-v1.5.0.zip` |
 | Source | `plugins/finance-core/manifest.json`, `adapter.py`, `ui.js` |
-| Archive SHA-256 | `f95049d6b411131b56612f0b40b3105f90e0cac7c528a0a01faa412fd3514ba3` |
+| Archive SHA-256 | `bc23bfbd69132eb0f2624412a67f74ab274363dab0abb7f1821fcbcb6a3603ed` |
 
-The archive contains exactly those three root files. The manifest pins both code files; the host additionally pins exact package/archive bytes. `python tools/build_frag_plugin.py --check` verifies the current source and archive. Source files use LF so Git line-ending normalization cannot silently change the bytes. Earlier 1.0.0 through 1.3.0 archives remain unchanged historical artifacts. This is a local build handoff, not publication or production installation. The FRAG repository and its installed pins have not been changed; installing 1.4.0 requires a separately reviewed FRAG synchronization.
+The archive contains exactly those three root files. The manifest pins both code files; the host additionally pins exact package/archive bytes. `python tools/build_frag_plugin.py --check` verifies the current source and archive. Source files use LF so Git line-ending normalization cannot silently change the bytes. Earlier 1.0.0 through 1.4.0 archives remain unchanged historical artifacts. This is a local build handoff, not publication or production installation. The FRAG repository and its installed pins have not been changed; installing 1.5.0 requires a separately reviewed FRAG synchronization.
 
 `ui.js` and the adapter's legacy GET dashboard routes remain archive compatibility content. Native FRAG does not mount a plugin UI, generic catalog or Dashboard. Journal changes open standalone FC and require FC authentication.
 
@@ -35,7 +35,7 @@ Use a scoped `ledger:read` token for the named Workspace. Never place credential
 - `list_scopes(scope_id=None)` returns configured IDs in active, token-accessible Workspaces. Monthly labels are synthesized from exact IDs; discovery never fetches every configured report.
 - `read_evidence_request(request)` accepts exactly `protocolVersion`, `pluginId`, `scopeId`, `recordIds`; protocol is integer 2. It returns the same protocol/plugin/scope and records in request order.
 - One request names one Workspace and one to ten distinct configured IDs; the total configured record whitelist is also capped at ten. Arbitrary routes, wildcard months, duplicate IDs, unlisted records and cross-Workspace expansion are rejected.
-- Each record has exactly `recordId`, `label`, `text`, `revision`. HTTP calls are GET only. FC health must identify `finance-core`, `ok` and API `3.4.0`; Workspace and record identity are validated.
+- Each record has exactly `recordId`, `label`, `text`, `revision`. HTTP calls are GET only. FC health must identify `finance-core`, `ok` and API `3.5.0`; Workspace and record identity are validated.
 - `source_revision()` binds supplier URL and whitelist without HTTP or credentials. The host checks package/configuration revisions before and after reads and rechecks record revisions at completion.
 
 ### Monthly report
@@ -61,4 +61,4 @@ npm.cmd run check:versions
 
 Default tests are synthetic: archive/file integrity, protocol validation, GET-only scope isolation, no HTTP on invalid requests, safe discovery, complete monthly formatting, strict field rejection and stable revisions. Explicit private CSV acceptance uses isolated ignored Vaults without modifying originals or calling providers; sources, raw logs, reports, databases and screenshots stay out of Git. Local contract, browser, live loopback, provider and human financial-semantic acceptance are different claims. Both repositories may be updated directly under the current unified authorization; commits, pushes, tags, public release and production installation remain separate human actions.
 
-API 3.3 personal-balance-sheet, Living review, asset, ownership and reconciliation endpoints, and API 3.4 dated balances and their monthly readout, require an owner session. Reader 1.4.0 does not expose these endpoints or expand the report whitelist. Its version change adapts the exact health pin only; the Monthly Review v1 calculation and strict shape remain unchanged. Reader 1.3.0 still rejects API 3.4.0 by design. Real-data acceptance is a separately authorized human operation; this implementation was tested with synthetic data only.
+API 3.3 personal-balance-sheet, Living review, asset, ownership and reconciliation endpoints, API 3.4 dated balances and their monthly readout, and API 3.5 opening workflows, Notes and opt-in activity reports require an owner session. Reader 1.5.0 does not expose these endpoints or expand the report whitelist. Its version change adapts the exact health pin only; the Monthly Review v1 calculation and strict shape remain unchanged. Earlier readers, including 1.4.0 pinned to API 3.4.0, reject API 3.5.0 by design. Real-data acceptance is a separately authorized human operation; this implementation was tested with synthetic data only.

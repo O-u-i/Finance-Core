@@ -15,12 +15,13 @@ export default function MonthlyReview({ fc }) {
   return <div className="monthly-review" aria-busy={fc.loading}>
     <section className="review-toolbar">
       <div><span className="review-eyebrow">CLOSED-MONTH REVIEW</span><h2>Your month, in context.</h2><p>Three calendar months. Posted records only. No implicit currency conversion.</p></div>
-      <form onSubmit={event => { event.preventDefault(); fc.navigate('monthlyreview', month); }}>
+      <form onSubmit={event => { event.preventDefault(); fc.navigate(fc.route.view, month, fc.route.segment || ''); }}>
         <Field label="Completed month"><input type="month" required min="0001-03" max={latestCompletedMonth()} value={month} onChange={event => setMonth(event.target.value)}/></Field>
         <Button primary type="submit" disabled={fc.busy || fc.loading}>Review month</Button>
       </form>
     </section>
     {report && <div className="review-boundary"><span className="badge">{report.status === 'ready' ? 'Ledger calculated' : 'Calculation blocked'}</span><p>External completeness: <strong>unknown</strong>. Reconciliation is not proof that all real-world transactions were recorded. Account roles use current Master data.</p></div>}
+    {report?.calculationVersion === 'monthly-activity-v1' && <p>Classified opening stock and linked opening reversals are excluded from period activity ({report.openingEntryIds.length} entries in this window). Stock reports still retain them. Ordinary unclassified history is not changed.</p>}
     {report?.status === 'blocked' && <div className="notice error" role="alert">{report.coverage.invalidDateEntryCount} posted entries have unassignable dates. Correct their source dates through a reviewed data repair before using this report; no totals are delivered.</div>}
     {report?.status === 'ready' && <>
       <div className="review-period"><h3>{report.month} <small>compared with the previous two months</small></h3>{codes.length > 0 && <Select label="Currency" value={selected} options={codes.map(code => ({ value: code, label: code }))} onChange={setCurrency}/>}</div>

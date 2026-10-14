@@ -67,7 +67,7 @@ def create_app(
 
     app = FastAPI(
         title="Finance Core API",
-        version="3.4.0",
+        version="3.5.0",
         description="Local-first deterministic finance domain and multi-vault data service.",
         lifespan=lifespan,
     )
