@@ -12,6 +12,27 @@ before(async () => {
 after(async () => { await server?.close(); });
 const render = (Component, props) => renderToStaticMarkup(React.createElement(Component, props));
 
+test('ready identity can be FINCR-only without changing the full authentication Logo', () => {
+  assert.match(render(components.Logo, {}), /Finance Core/);
+  const ready = render(components.Logo, { markOnly:true, small:true });
+  assert.match(ready, /alt="FINCR"/);
+  assert.doesNotMatch(ready, /Finance Core|Local finance/);
+});
+
+test('shared record rows keep exact amounts, metadata, semantic state and fixed action slots', () => {
+  const html = render(components.RecordRow, { title:'Synthetic account', meta:'2026-09-12', amount:'9007199254740993.12', currency:'CNY',
+    status:React.createElement(components.Status,{state:'warning'},'Pending'), actions:React.createElement('button',{},'Details') });
+  for(const slot of ['record-identity','record-primary','record-actions']) assert.match(html,new RegExp(slot));
+  assert.match(html,/9007199254740993.12/); assert.match(html,/data-state="warning"/);
+  assert.ok(html.indexOf('record-identity')<html.indexOf('record-primary')&&html.indexOf('record-primary')<html.indexOf('record-actions'));
+});
+
+test('ordinary panel explanations use help while irreversible notices remain visible', () => {
+  const html = render(components.Panel, { title:'Synthetic operation', description:'Ordinary calculation explanation.', notice:'No ordinary undo.' });
+  assert.match(html, /class="help-trigger"/); assert.doesNotMatch(html, /<p>Ordinary calculation/);
+  assert.match(html, /<p class="notice">No ordinary undo\.<\/p>/);
+});
+
 test('record tables expose sort direction and order decimal strings without losing precision', () => {
   const html = render(components.Table, { caption: 'Synthetic balances', columns: [['amount', 'Amount']],
     rows: [{ amount: '9007199254740993.12' }, { amount: '-2' }, { amount: '0.09' }, { amount: '0.1' }] });
@@ -33,7 +54,7 @@ test('Overview keeps reconciliation checks available without dumping technical I
   assert.match(html, /2026-09-30/);
 });
 
-test('T-accounts use one vertical container per account, with Credit before Debit', async () => {
+test('T-accounts show exact server balances in clickable account/currency summary cards', async () => {
   const { Reports } = await server.ssrLoadModule('/demo/src/pages/Dashboard.jsx');
   const html = render(Reports, { fc: { route: { view: 'taccounts' }, data: { tAccounts: [
     { accountId: 'a', accountCode: '1002', accountName: 'Bank B', commodityCode: 'USD', credit: '2', debit: '3', balance: '1' },
@@ -41,7 +62,11 @@ test('T-accounts use one vertical container per account, with Credit before Debi
   ] } } });
   assert.equal((html.match(/class="t-account-card"/g) || []).length, 2);
   assert.ok(html.indexOf('1001') < html.indexOf('1002'));
-  assert.ok(html.indexOf('>Credit<') < html.indexOf('>Debit<'));
+  assert.match(html, /class="t-account-grid"/);
+  assert.match(html, /View postings for 1001 Bank A, CNY/);
+  assert.match(html, />Balance</);
+  assert.doesNotMatch(html, />Difference<|>Normal balance<|>Posting count<|<table/);
+  assert.match(html, />Debit</); assert.match(html, />Credit</);
 });
 
 test('Monthly plans expose category, edit, delete, due-date wording and backend category totals', async () => {
@@ -58,19 +83,21 @@ test('Monthly plans expose category, edit, delete, due-date wording and backend 
   assert.match(html, /CF inflow/);
 });
 
-test('Asset registry retains its Note separately from valuation context and explains the valuation month', async () => {
+test('Asset rows prioritize server valuation and status; Note and forms are secondary dialog content', async () => {
   const { AssetsLiabilities } = await server.ssrLoadModule('/demo/src/pages/PersonalFinance.jsx');
   const html = render(AssetsLiabilities, { fc: { route: { view: 'assets', tab: '2026-09', segment: 'living' }, data: {
     parties: [{ id: 'owner', name: 'Synthetic owner' }], commodities: [{ code: 'CNY', kind: 'currency', status: 'active' }],
     assets: [{ id: 'bicycle', name: 'Synthetic bicycle', assetType: 'Bicycle', currency: 'CNY', purchasedDate: '2026-01-03', purchaseCost: '120', ownershipShare: '1', ownerPartyId: 'owner', note: 'Synthetic registry context' }],
     observations: [{ id: 'value', subjectId: 'bicycle', month: '2026-09', kind: 'valuation', amount: '90', currency: 'CNY', source: 'Synthetic valuation', note: 'Synthetic valuation context', confirmed: true }],
   } } });
-  assert.match(html, /Synthetic registry context/);
-  assert.match(html, /Saved valuation/);
+  assert.match(html, /asset-record/);
+  assert.match(html, />90<span class="record-currency">CNY/);
+  assert.match(html, />Confirmed</);
+  assert.doesNotMatch(html, /Synthetic registry context|Synthetic valuation context|<form|<textarea/);
   assert.match(html, /2026-09-30/);
   assert.doesNotMatch(html, /As-of month \(balances are month-end observations\)/);
-  assert.match(html, /Save valuation/);
-  assert.match(html, /Record disposal/);
+  assert.match(html, /Edit valuation/);
+  assert.match(html, /Details/);
 });
 
 test('Journal lists expose independent searchable date and description ordering', async () => {
@@ -79,6 +106,18 @@ test('Journal lists expose independent searchable date and description ordering'
   assert.match(html, /Filter Unposted drafts/);
   assert.match(html, /Filter Posted journal/);
   assert.equal((html.match(/aria-label="Sort ascending"/g) || []).length, 2);
+});
+
+test('Overview presents both segments without empty charts or combining financial amounts', async () => {
+  const { FinanceOverview } = await server.ssrLoadModule('/demo/src/pages/RecordedBalances.jsx');
+  const html = render(FinanceOverview, {fc:{route:{view:'overview',month:'2026-09'},data:{
+    entries:[{id:'entry',date:'2026-09-12',description:'Synthetic posted record',balancingCommodityCode:'CNY',postings:[]}],
+    recordedReport:{accounts:[{accountId:'living',code:'L001',name:'Synthetic Living record',observedDate:'2026-09-14',amount:'0.13',currency:'CNY',status:'confirmed'}]},
+    assets:[],
+  }}});
+  assert.match(html,/Synthetic posted record/); assert.match(html,/Synthetic Living record/);
+  assert.match(html,/Investment · Journal/); assert.match(html,/Living · L001/);
+  assert.match(html,/0.13/); assert.doesNotMatch(html,/<canvas|chart-placeholder/);
 });
 
 test('Batch creation and ownership agreements offer structured fields instead of required JSON input', async () => {

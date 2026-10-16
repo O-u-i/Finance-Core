@@ -72,9 +72,13 @@ def test_dated_records_do_not_rewrite_legacy_month_end_reports_or_infer_dates(tm
         assert [value['id'] for value in api.get('/api/v2/balance-records').json()['data']] == ['first']
 
 
-def test_backup_roundtrip_preserves_multiple_same_day_records_and_corrections(tmp_path):
+def test_backup_roundtrip_preserves_multiple_same_day_records_and_corrections(tmp_path, monkeypatch):
     with client(tmp_path) as api:
         seed(api)
+        # This case expects submission order, not the canonical ID tie-breaker.
+        # Windows can return the same wall-clock tick for all three requests.
+        stamps = iter(f'2026-09-01T00:00:0{second}+00:00' for second in range(3))
+        monkeypatch.setattr('finance_core.personal_finance_repository.now_iso', lambda: next(stamps))
         for item in [record('one'), record('two', amount='121.25'),
                      record('corrected', amount='122.25', supersedes='two', reason='Synthetic statement correction')]:
             assert api.post('/api/v2/balance-records', json=item).status_code == 201

@@ -49,6 +49,15 @@ test('dated Living balances default to the current Shanghai month, separately fr
  assert.equal(viewPaths('livingreview','',now,'living').personalReport,'/reports/living-monthly-review?month=2026-02');
  assert.equal(viewPaths('balances','',now,'living').balanceRecords,'/balance-records');
 });
+test('Overview record sources are cross-segment and use the selected report month consistently',()=>{
+ const paths=viewPaths('overview','consolidated',new Date('2026-10-16T00:00:00Z'),'living','2026-08');
+ assert.equal(paths.entries,'/journal-entries');
+ assert.equal(paths.assets,'/non-financial-assets');
+ assert.equal(paths.observations,'/monthly-observations');
+ assert.equal(paths.personalReport,'/reports/personal-balance-sheet?month=2026-08');
+ assert.equal(paths.recordedReport,'/reports/living-recorded-balances?month=2026-08');
+ assert.equal(routeHash({view:'overview',tab:'consolidated',month:'2026-08',segment:'living'}),'#/overview/consolidated/2026-08');
+});
 test('configuration needs an authenticated session and two usable accounts for one active currency',()=>{
  const input={loaded:true,workspace,actor,commodities:[currency('CNY')],accounts:[account('cash',['CNY']),account('capital',['CNY'])]};
  assert.equal(assessSetup(input).ready,true);

@@ -51,7 +51,7 @@ export function viewPaths(view, tab = '', now = new Date(), segment = '', asOfMo
   const recordedMonth = selectedRecordedMonth({ tab, month: asOfMonth }, now);
   if (view === 'cashflow') return { activityCashFlow: `/reports/activity-cash-flow?month=${recordedMonth}` };
   const recorded = { balanceRecords: '/balance-records', recordedReport: `/reports/living-recorded-balances?month=${recordedMonth}` };
-  if (view === 'overview') return { ...personal, assets: '/non-financial-assets', personalReport: `/reports/personal-balance-sheet?month=${month}`, recordedReport: recorded.recordedReport };
+  if (view === 'overview') return { ...personal, entries: '/journal-entries', assets: '/non-financial-assets', observations: '/monthly-observations', personalReport: `/reports/personal-balance-sheet?month=${month}`, recordedReport: `/reports/living-recorded-balances?month=${month}` };
   if (view === 'master') return { ...views.master[1], ...personal, living: '/living-accounts', ...(tab === 'ownership' ? {
     legacyMapping: '/legacy-living-mapping', arrangements: '/investment-arrangements', personalReport: `/reports/personal-balance-sheet?month=${month}`,
   } : {}), ...(tab === 'opening' ? { openingRecords: '/opening-balances', balanceRecords: '/balance-records' } : {}) };

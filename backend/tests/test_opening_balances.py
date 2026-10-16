@@ -208,9 +208,11 @@ def test_living_opening_is_an_actual_date_record_and_never_a_journal_or_month_en
         assert next(item for item in missing if item['accountId'] == 'living')['amount'] is None
 
 
-def test_opening_confirmation_rejects_a_draft_changed_after_the_reviewed_version(tmp_path):
+@pytest.mark.parametrize('updated_clock', ['2026-09-01T00:00:00+00:00', '2026-08-31T23:59:59+00:00'])
+def test_opening_confirmation_rejects_a_draft_changed_after_the_reviewed_version(tmp_path, monkeypatch, updated_clock):
     with client(tmp_path) as api:
         seed(api)
+        monkeypatch.setattr('finance_core.ledger_repository.now_iso', lambda: '2026-09-01T00:00:00+00:00')
         request = {'id': 'reviewed', 'date': '2026-08-01', 'balancingCommodityCode': 'CNY',
                    'equityAccountId': 'capital', 'source': 'Synthetic statement',
                    'balances': [{'accountId': 'cash-cny', 'commodityCode': 'CNY', 'amount': '100'}]}
@@ -219,7 +221,9 @@ def test_opening_confirmation_rejects_a_draft_changed_after_the_reviewed_version
         revised = stored['draft']
         for posting in revised['postings']:
             posting['units'] = '120'
+        monkeypatch.setattr('finance_core.ledger_repository.now_iso', lambda: updated_clock)
         updated = api.put(api.prefix + '/journal-entry-drafts/reviewed', json=revised).json()['data']
+        assert updated['updatedAt'] > stored['updatedAt']
         response = api.post(api.prefix + '/opening-balances/reviewed/post', json={
             'confirmed': True, 'expectedUpdatedAt': stored['updatedAt']})
         assert response.status_code == 422, response.text

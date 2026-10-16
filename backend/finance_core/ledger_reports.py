@@ -17,11 +17,16 @@ def account_flows(repo: LedgerRepository) -> list[dict[str, Any]]:
     groups: dict[tuple[str, str], dict[str, Decimal | int]] = defaultdict(
         lambda: {"debit": Decimal(0), "credit": Decimal(0), "count": 0}
     )
-    rows = repo.connection.execute("SELECT account_id,commodity_code,side,units FROM postings_v2").fetchall()
+    rows = repo.connection.execute(
+        "SELECT p.account_id,p.commodity_code,p.side,p.units,e.date "
+        "FROM postings_v2 p JOIN journal_entries_v2 e ON e.id=p.entry_id"
+    ).fetchall()
+    dates: dict[tuple[str, str], list[str]] = defaultdict(list)
     for row in rows:
         group = groups[(row["account_id"], row["commodity_code"])]
         group[row["side"]] = decimal_add(group[row["side"]], Decimal(row["units"]))
         group["count"] += 1
+        dates[(row["account_id"], row["commodity_code"])].append(row["date"])
     output = []
     for (account_id, commodity), values in sorted(groups.items()):
         account = accounts[account_id]
@@ -36,8 +41,31 @@ def account_flows(repo: LedgerRepository) -> list[dict[str, Any]]:
             "credit": canonical_decimal(credit),
             "balance": canonical_decimal(normal_balance(account.type, debit, credit)),
             "count": values["count"],
+            "firstPostingDate": min(dates[(account_id, commodity)]),
+            "lastPostingDate": max(dates[(account_id, commodity)]),
         })
     return output
+
+
+def account_postings(repo: LedgerRepository, account_id: str, commodity: str, offset: int, limit: int) -> dict[str, Any]:
+    """Read immutable entry dates and exact units; never invent a posting clock."""
+    account = repo.get_account(account_id)
+    if account is None or repo.get_commodity(commodity) is None:
+        raise LookupError("Account or commodity was not found.")
+    rows = repo.connection.execute(
+        "SELECT p.id,p.entry_id,e.date,p.side,p.units FROM postings_v2 p "
+        "JOIN journal_entries_v2 e ON e.id=p.entry_id "
+        "WHERE p.account_id=? AND p.commodity_code=? ORDER BY e.date,e.id,p.id LIMIT ? OFFSET ?",
+        (account_id, commodity, limit, offset),
+    ).fetchall()
+    count = repo.connection.execute(
+        "SELECT COUNT(*) FROM postings_v2 WHERE account_id=? AND commodity_code=?", (account_id, commodity)
+    ).fetchone()[0]
+    return {"data": [{"postingId": row["id"], "entryId": row["entry_id"], "postingDate": row["date"],
+                      "debit": row["units"] if row["side"] == "debit" else "0",
+                      "credit": row["units"] if row["side"] == "credit" else "0"} for row in rows],
+            "accountId": account_id, "commodityCode": commodity, "count": count,
+            "offset": offset, "limit": limit, "hasMore": offset + len(rows) < count, "readOnly": True}
 
 
 def holdings(repo: LedgerRepository) -> list[dict[str, Any]]:

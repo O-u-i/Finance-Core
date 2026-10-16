@@ -379,9 +379,31 @@ class TAccount(ContractModel):
     balance: str
     count: int = Field(ge=0)
 
+    first_posting_date: str | None = Field(default=None, alias="firstPostingDate")
+    last_posting_date: str | None = Field(default=None, alias="lastPostingDate")
+
 
 class TAccountListResponse(WorkspaceLedgerResponse):
     data: list[TAccount]
+
+
+class TAccountPosting(ContractModel):
+    posting_id: str = Field(alias="postingId")
+    entry_id: str = Field(alias="entryId")
+    posting_date: str = Field(alias="postingDate", description="Immutable Journal entry date, not a posting timestamp.")
+    debit: str
+    credit: str
+
+
+class TAccountPostingResponse(WorkspaceLedgerResponse):
+    data: list[TAccountPosting]
+    account_id: str = Field(alias="accountId")
+    commodity_code: str = Field(alias="commodityCode")
+    count: int = Field(ge=0)
+    offset: int = Field(ge=0)
+    limit: int = Field(ge=1, le=200)
+    has_more: bool = Field(alias="hasMore")
+    read_only: Literal[True] = Field(alias="readOnly")
 
 
 class DashboardCommoditySummary(ContractModel):

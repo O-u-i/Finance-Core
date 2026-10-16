@@ -1,5 +1,9 @@
 # Frontend workbench and planned cash flow
 
+Historical 3.6.0 display baseline. The [3.7.0 desktop workbench](08-desktop-workbench.md)
+supersedes the layout, T-account card and Note-placement descriptions below;
+the monthly-plan contract and financial rules remain unchanged.
+
 Finance Core product 3.6.0 adds the API 3.6.0 owner-session report
 `GET /api/v3/workspaces/{workspace_id}/reports/monthly-plans?month=YYYY-MM`.
 It is a read-only forecast, not posted cash activity. Ledger/registry schemas and

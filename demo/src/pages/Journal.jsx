@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { id, localDate, validationMatches } from '../api.js';
-import { Button, Empty, Field, ListControls, Panel, StepContent, Steps, Table } from '../components.jsx';
+import { Button, Dialog, Empty, Field, Help, ListControls, Panel, RecordRow, Status, StepContent, Steps, Table } from '../components.jsx';
 import { orderedRecords } from '../records.js';
 
 const blankPosting = (accounts = [], commodity = 'USD', index = 0) => ({ id: id('posting'), accountId: accounts[index]?.id || accounts[0]?.id || '', side: index ? 'credit' : 'debit', units: '1', commodityCode: commodity, memo: '', cashFlowCategory: 'other', lotAllocations: [] });
@@ -21,6 +21,7 @@ function JournalRecords({ label, records = [], children }) {
 }
 
 export default function Journal({ fc }) {
+  const [editing, setEditing] = useState(false), [detail, setDetail] = useState(null);
   const [editor, setEditor] = useState(() => blankDraft(fc.data));
   const [validation, setValidation] = useState(null);
   const [validated, setValidated] = useState('');
@@ -57,11 +58,12 @@ export default function Journal({ fc }) {
     }, 'Entry posted. It is now immutable.');
     if (result) { fc.clean(); setStep(3); setValidation(null); setValidated(''); setConfirmed(false); setSaved(false); setEditor(blankDraft(fc.data)); }
   };
-  const openDraft = (draft) => { if (!fc.canLeave()) return; edited.current = true; setEditor(structuredClone(draft)); setSaved(true); setValidation(null); setValidated(''); setConfirmed(false); setStep(0); fc.clean(); document.querySelector('#journal-editor')?.scrollIntoView({ behavior: 'instant' }); };
+  const openDraft = (draft) => { if (!fc.canLeave()) return; edited.current = true; setEditor(structuredClone(draft)); setSaved(true); setValidation(null); setValidated(''); setConfirmed(false); setStep(0); fc.clean(); setEditing(true); };
+  const closeEditor = () => { if (fc.canLeave()) { fc.clean(); setEditing(false); } };
   return <>
-    <div className="journal-tools actions">{!fc.migrationRequired && <Button disabled={fc.busy} onClick={() => fc.navigate('master', 'opening', 'investment')}>Opening balances</Button>}<Button disabled={fc.busy} onClick={() => fc.navigate('data', 'import')}>Import CSV / JSON</Button><Button disabled={fc.busy} onClick={() => fc.navigate('data', 'backup')}>Export records</Button><Button disabled={fc.busy} onClick={() => fc.navigate('taccounts')}>View T-accounts</Button></div>
+    <div className="journal-tools actions"><Button primary disabled={fc.busy || fc.readonly} onClick={() => { if (fc.canLeave()) { setEditor(blankDraft(fc.data)); setSaved(false); setValidation(null); setValidated(''); setConfirmed(false); setStep(0); fc.clean(); setEditing(true); } }}>New draft</Button>{!fc.migrationRequired && <Button disabled={fc.busy} onClick={() => fc.navigate('master', 'opening', 'investment')}>Opening balances</Button>}<Button disabled={fc.busy} onClick={() => fc.navigate('data', 'import')}>Import CSV / JSON</Button><Button disabled={fc.busy} onClick={() => fc.navigate('data', 'backup')}>Export records</Button><Button disabled={fc.busy} onClick={() => fc.navigate('taccounts')}>View T-accounts</Button></div>
+    {editing && <Dialog title="Journal draft" dismissible={!fc.busy} onClose={closeEditor}>
     <Steps labels={['Edit draft', 'Validate', 'Confirm', 'Posted']} current={step}/>
-    <Panel title="Journal draft" description="Record a balanced transaction. Validate it before confirming the immutable entry." action={<Button disabled={fc.busy} onClick={() => { if (fc.canLeave()) { setEditor(blankDraft(fc.data)); setSaved(false); setValidation(null); setValidated(''); setConfirmed(false); setStep(0); fc.clean(); } }}>New draft</Button>}>
       <form id="journal-editor" onSubmit={(event) => { event.preventDefault(); save(); }}>
         <fieldset disabled={fc.busy || fc.readonly}>
           <StepContent step={step}>
@@ -73,7 +75,7 @@ export default function Journal({ fc }) {
             <Field label="Balancing commodity"><select value={editor.balancingCommodityCode} onChange={(e) => set('balancingCommodityCode', e.target.value)}>{commodities.map((item) => <option key={item.code}>{item.code}</option>)}</select></Field>
             <Field label="Source" value={editor.source} onChange={(e) => set('source', e.target.value)}/>
             <Field label="Reference" value={editor.reference} onChange={(e) => set('reference', e.target.value)}/>
-            <Field label="Tags (comma separated; Living reconciliation: personal-transfer:in:CNY / personal-transfer:out:CNY)" value={editor.tags.join(', ')} onChange={e => set('tags',e.target.value.split(',').map(value => value.trim()).filter(Boolean))}/>
+            <Field label={<>Tags <Help label="Tags">Comma separated. Living reconciliation uses personal-transfer:in:CNY or personal-transfer:out:CNY.</Help></>} value={editor.tags.join(', ')} onChange={e => set('tags',e.target.value.split(',').map(value => value.trim()).filter(Boolean))}/>
           </div>
           {!accounts.length && <p className="notice">Add active accounts and commodities in Master data before creating a draft.</p>}
           <div className="postings">{editor.postings.map((item, index) => <div className="posting" key={item.id}>
@@ -95,18 +97,19 @@ export default function Journal({ fc }) {
           <div className="actions"><Button type="button" onClick={() => update({ ...editor, postings: [...editor.postings, blankPosting(accounts, editor.balancingCommodityCode)] })}>Add posting</Button><Button type="submit">Save draft</Button><Button type="button" primary onClick={validate} disabled={!accounts.length || !editor.description.trim()}>Validate draft</Button></div>
           </div>
           {step === 2 && <div className="review-summary"><h3>{editor.description}</h3><p>{editor.date} · {editor.postings.length} postings · {editor.balancingCommodityCode}</p><Table rows={editor.postings} columns={[["accountId", 'Account', (p) => accounts.find((a) => a.id === p.accountId)?.name || p.accountId], ['side', 'Side'], ['units', 'Units'], ['commodityCode', 'Commodity']]}/><Button type="button" onClick={() => { setStep(0); setValidation(null); setValidated(''); setConfirmed(false); }}>Edit draft</Button></div>}
-          {validation && <div className={`validation ${validation.valid ? 'success' : 'error'}`} role="status"><h3>{validation.valid ? 'Validation passed' : 'Validation failed'}</h3>{validation.preview && <p>Debit {validation.preview.debitTotal} · Credit {validation.preview.creditTotal} · Difference {validation.preview.difference}</p>}{validation.issues?.map((issue, index) => <p key={index}>{issue.path}: {issue.message}</p>)}</div>}
+          {validation && <div className={`validation ${validation.valid ? 'success' : 'error'}`} role="status"><h3>{validation.valid ? 'Validation passed' : 'Validation failed'}</h3>{validation.preview && <p>Debit {validation.preview.debitTotal} · Credit {validation.preview.creditTotal} · Difference {validation.preview.difference} <Help label="Difference">Debit total minus Credit total.</Help></p>}{validation.issues?.map((issue, index) => <p key={index}>{issue.path}: {issue.message}</p>)}</div>}
           {validation?.valid && <div className="confirmation"><label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)}/> I reviewed this entry. Posting is permanent; corrections require a linked reversal.</label><Button type="button" primary disabled={!canPost} onClick={post}>Confirm and post</Button></div>}
           {step === 3 && <div className="step-result" role="status"><span aria-hidden="true">✓</span><h3>Entry posted</h3><p>The entry is immutable. Find it in the posted journal below.</p><Button type="button" primary onClick={() => setStep(0)}>Record another entry</Button></div>}
           </StepContent>
         </fieldset>
       </form>
+    </Dialog>}
+    <Panel title="Unposted drafts">
+      <JournalRecords label="Unposted drafts" records={fc.data.drafts?.map(item => item.draft)}>{draft => <RecordRow key={draft.id} title={draft.description} meta={<>{draft.date} · {draft.balancingCommodityCode} <Help label="Postings">{`${draft.postings.length} postings. Not included in the posted ledger.`}</Help></>} status={<Status state="warning">Draft</Status>} actions={<><Button disabled={fc.busy} onClick={() => openDraft(draft)}>Review</Button><Button danger disabled={fc.busy || fc.readonly} onClick={() => { if (confirm('Delete this unposted draft?')) fc.ledger(`/journal-entry-drafts/${pathId(draft.id)}`, { method: 'DELETE' }, 'Draft deleted.'); }}>Delete</Button></>}/>}</JournalRecords>
     </Panel>
-    <Panel title="Unposted drafts" description="Drafts stay outside the ledger until posted.">
-      <JournalRecords label="Unposted drafts" records={fc.data.drafts?.map(item => item.draft)}>{draft => <article key={draft.id}><div><strong>{draft.description}</strong><small>{draft.date} · {draft.postings.length} postings</small></div><div className="actions"><Button disabled={fc.busy} onClick={() => openDraft(draft)}>Review</Button><Button danger disabled={fc.busy || fc.readonly} onClick={() => { if (confirm('Delete this unposted draft?')) fc.ledger(`/journal-entry-drafts/${pathId(draft.id)}`, { method: 'DELETE' }, 'Draft deleted.'); }}>Delete</Button></div></article>}</JournalRecords>
+    <Panel title="Posted journal">
+      <JournalRecords label="Posted journal" records={fc.data.entries}>{entry => <RecordRow key={entry.id} title={entry.description} meta={<>{entry.date} · {entry.balancingCommodityCode} · Immutable</>} status={<Status state={entry.reversalOf ? 'warning' : 'success'}>{entry.reversalOf ? 'Linked reversal' : 'Posted'}</Status>} actions={<><Button disabled={fc.busy} onClick={() => setDetail(entry)}>Details</Button>{!entry.reversalOf && <Button danger disabled={fc.busy || fc.readonly} onClick={() => { if (confirm('Create a linked reversal? The original entry will remain.')) fc.ledger(`/journal-entries/${pathId(entry.id)}/reverse`, { method: 'POST' }, 'Linked reversal created.'); }}>Reverse</Button>}</>}/>}</JournalRecords>
     </Panel>
-    <Panel title="Posted journal" description="Every correction retains the original entry and adds a linked reversal.">
-      <JournalRecords label="Posted journal" records={fc.data.entries}>{entry => <article key={entry.id}><div><strong>{entry.description}</strong><small>{entry.date} · {entry.balancingCommodityCode}{entry.reversalOf ? ' · Linked reversal' : ''}</small><details><summary>View postings</summary><Table rows={entry.postings} columns={[["accountId", 'Account'], ['side', 'Side'], ['units', 'Units'], ['commodityCode', 'Commodity'], ['valuationAmount', 'Valuation'], ['memo', 'Note']]}/></details></div>{!entry.reversalOf && <Button danger disabled={fc.busy || fc.readonly} onClick={() => { if (confirm('Create a linked reversal? The original entry will remain.')) fc.ledger(`/journal-entries/${pathId(entry.id)}/reverse`, { method: 'POST' }, 'Linked reversal created.'); }}>Reverse</Button>}</article>}</JournalRecords>
-    </Panel>
+    {detail && <Dialog title={detail.description} onClose={() => setDetail(null)}><div className="detail-context"><Status>Read only · Immutable</Status><span>{detail.date}</span></div><Table caption="Journal postings" rows={detail.postings} columns={[["accountId", 'Account', posting => accounts.find(account => account.id === posting.accountId)?.name || posting.accountId], ['side', 'Side'], ['units', 'Units'], ['commodityCode', 'Commodity'], ['valuationAmount', 'Valuation'], ['memo', 'Note']]}/></Dialog>}
   </>;
 }

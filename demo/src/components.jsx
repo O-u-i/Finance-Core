@@ -4,8 +4,8 @@ import { selectedMonth } from './navigation.js';
 import { orderedRecords, recordValue } from './records.js';
 export const options = values => values.map(value => ({ value, label: value }));
 
-export function Logo({ small = false }) {
-  return <span className="brand"><img src="/branding/logo.svg" width={small ? 119 : 162} height={small ? 30 : 40} alt="FINCR"/><span>Finance Core<small>Local finance, clearly.</small></span></span>;
+export function Logo({ small = false, markOnly = false }) {
+  return <span className={`brand${markOnly ? ' brand-mark' : ''}`}><img src="/branding/logo.svg" width={small ? 119 : 162} height={small ? 30 : 40} alt="FINCR"/>{!markOnly && <span>Finance Core<small>Local finance, clearly.</small></span>}</span>;
 }
 export function Button({ children, primary, danger, ...props }) { return <button className={`${primary ? 'primary' : ''} ${danger ? 'danger' : ''}`} {...props}>{children}</button>; }
 export function MonthPicker({ fc, label = 'As-of month (balances are month-end observations)', value = selectedMonth(fc.route) }) {
@@ -34,13 +34,40 @@ export function Dialog({ title, children, onClose, dismissible = true }) {
     const node = dialog.current, trigger = document.activeElement; node.showModal();
     return () => { if (node.open) node.close(); if (trigger?.isConnected) trigger.focus({ preventScroll: true }); };
   }, []);
-  return <dialog ref={dialog} className="detail-dialog" aria-labelledby={heading} onCancel={event => { if (dismissible) onClose(); else event.preventDefault(); }} onClose={onClose}>
+  return <dialog ref={dialog} className="detail-dialog" aria-labelledby={heading} onCancel={event => { event.preventDefault(); if (dismissible) onClose(); }} onClose={onClose}>
     <div className="dialog-heading"><h2 id={heading}>{title}</h2><Button type="button" disabled={!dismissible} onClick={onClose} aria-label={`Close ${title}`}>Close</Button></div>
     {children}
   </dialog>;
 }
-export function Panel({ title, description, action, children, className = '' }) {
-  return <section className={`panel ${className}`}><div className="panel-heading"><div><h2>{title}</h2>{description && <p>{description}</p>}</div>{action}</div>{children}</section>;
+export function Help({ children, label = 'Help' }) {
+  const trigger = useRef(null), bubble = useRef(null), [position, setPosition] = useState(null), tooltip = useId();
+  useLayoutEffect(() => {
+    if (!position || !bubble.current) return;
+    const rect = bubble.current.getBoundingClientRect();
+    if (rect.top < 11 || rect.bottom > innerHeight - 11) setPosition({ width: position.width, left: position.left, top: Math.max(12, innerHeight - rect.height - 12) });
+  }, [position]);
+  const show = event => {
+    if (event.pointerType !== 'mouse') return;
+    const rect = trigger.current.getBoundingClientRect(), width = Math.min(320, innerWidth - 24);
+    setPosition({ width, left: Math.max(12, Math.min(rect.left, innerWidth - width - 12)),
+      ...(rect.bottom + 150 > innerHeight ? { bottom: innerHeight - rect.top + 8 } : { top: rect.bottom + 8 }) });
+  };
+  return <span ref={trigger} className="help-trigger" role="img" aria-label={`${label}: ${children}`} aria-describedby={position ? tooltip : undefined} onPointerEnter={show} onPointerLeave={() => setPosition(null)}>
+    <span aria-hidden="true">?</span>{position && createPortal(<span ref={bubble} id={tooltip} className="help-tooltip" role="tooltip" style={position}>{children}</span>, trigger.current?.closest('dialog[open]') || document.body)}
+  </span>;
+}
+export function Status({ children, state = 'neutral' }) {
+  return <span className="record-status" data-state={state}>{children}</span>;
+}
+export function RecordRow({ title, meta, amount, currency, status, actions, className = '' }) {
+  return <article className={`workbench-record ${className}`}>
+    <div className="record-identity"><h3>{title}</h3><div className="record-meta">{meta}</div></div>
+    <div className="record-primary">{amount != null && <div className="record-amount">{amount}<span className="record-currency">{currency}</span></div>}{status}</div>
+    <div className="record-actions">{actions}</div>
+  </article>;
+}
+export function Panel({ title, description, notice, action, children, className = '' }) {
+  return <section className={`panel ${className}`}><div className="panel-heading"><div className="panel-title"><h2>{title}</h2>{description && <Help label={typeof title === 'string' ? title : 'Help'}>{description}</Help>}</div>{action}</div>{notice && <p className="notice">{notice}</p>}{children}</section>;
 }
 export function Field({ label, children, ...props }) {
   const id = useId();

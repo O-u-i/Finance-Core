@@ -350,6 +350,11 @@ class LedgerRepository:
         with transaction(self.connection):
             from finance_core.opening_balances import opening_date
             stored = self.get_draft(draft_id)
+            if stored and stored['status'] == 'draft':
+                # updatedAt is also the reviewed-version token. A repeated or
+                # backward wall clock must not let an old confirmation post new facts.
+                timestamp = max(datetime.fromisoformat(timestamp),
+                                datetime.fromisoformat(stored['updatedAt']) + timedelta(microseconds=1)).isoformat()
             if stored and stored['status'] == 'draft' and opening_date(stored['draft']):
                 old_tags = {tag for tag in stored['draft']['tags'] if tag.startswith('fc:opening-')}
                 new_tags = {tag for tag in draft.tags if tag.startswith('fc:opening-')}
@@ -670,6 +675,9 @@ class LedgerRepository:
 
     def account_flows(self) -> list[dict[str, Any]]:
         return ledger_reports.account_flows(self)
+
+    def account_postings(self, account_id: str, commodity: str, offset: int, limit: int) -> dict[str, Any]:
+        return ledger_reports.account_postings(self, account_id, commodity, offset, limit)
     def holdings(self) -> list[dict[str, Any]]:
         return ledger_reports.holdings(self)
     def get_holding(self, holding_id: str) -> dict[str, Any] | None:

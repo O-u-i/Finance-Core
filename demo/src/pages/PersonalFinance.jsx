@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { id } from '../api.js';
 import { selectedMonth } from '../navigation.js';
-import { Button, Dialog, Field, ListControls, MonthPicker, Panel, ResourceForm, Table, Tabs } from '../components.jsx';
+import { Button, Dialog, Empty, Field, Help, ListControls, MonthPicker, Panel, RecordRow, ResourceForm, Status, Table, Tabs } from '../components.jsx';
 import { orderedRecords } from '../records.js';
 import ReportChecks from '../ReportChecks.jsx';
 
@@ -9,7 +9,7 @@ const priorMonth = (month) => {
   const [year, number] = month.split('-').map(Number);
   return `${number === 1 ? year - 1 : year}-${String(number === 1 ? 12 : number - 1).padStart(2, '0')}`;
 };
-const currentObservation = (fc, kind, subject, month) => {
+export const currentObservation = (fc, kind, subject, month) => {
   const observations = fc.data.observations || [];
   const replaced = new Set(observations.map(item => item.supersedes).filter(Boolean));
   return observations.find(item => !item.observedDate && item.kind === kind && item.subjectId === subject && item.month === month && !replaced.has(item.id));
@@ -49,16 +49,16 @@ function ValuationForm({ fc, asset, month, current, save }) {
     const result = await save('/monthly-observations', { method:'POST', body: { id:id('valuation'), subjectId:asset.id, month, kind:'valuation', currency:asset.currency, amount, source, note, confirmed:true, ...(current ? { supersedes:current.id, reason } : {}) } }, `Valuation saved for ${month}. No Journal entry was created.`);
     if (result) { fc.clean(form); setConfirmed(false); }
   }}><fieldset disabled={fc.busy || fc.readonly}><div className="form-grid"><Field label={`Whole-asset value · ${asset.currency}`}><input name="amount" inputMode="decimal" value={amount} required onChange={event => { setAmount(event.target.value); setConfirmed(false); }}/></Field><Field label="Valuation source"><input name="source" value={source} maxLength={500} required onChange={event => { setSource(event.target.value); setConfirmed(false); }}/></Field>{current && <Field label="Correction reason"><input name="reason" value={reason} required onChange={event => { setReason(event.target.value); setConfirmed(false); }}/></Field>}<Field label="Note"><textarea name="note" rows={2} maxLength={4000} value={note} onChange={event => { setNote(event.target.value); setConfirmed(false); }}/></Field></div>
-    <p>{current ? 'Saving appends a correction and keeps the earlier valuation. Enter a correction reason.' : previous ? 'The previous month is only a suggestion. Confirm this month’s value independently.' : 'No value is recorded for this month. Enter a value and source, then confirm below.'}</p>
+    <div className="valuation-help"><Help label="Valuation source">{current ? 'Saving appends a correction and keeps the earlier valuation. Enter a correction reason.' : previous ? 'The previous month is only a suggestion. Confirm this month’s value independently.' : 'No value is recorded for this month. Purchase cost is not an automatic valuation.'}</Help></div>
     <div className="actions"><label className="balance-confirmation"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)}/> I confirm this value at {month} month end, not today’s value.</label><Button type="submit" primary disabled={!confirmed}>{fc.busy ? 'Saving…' : 'Save valuation'}</Button></div></fieldset></form>;
 }
 
 function AssetCard({ fc, asset, month }) {
   const current = currentObservation(fc, 'valuation', asset.id, month);
-  const [feedback, setFeedback] = useState(null), [disposing, setDisposing] = useState(false);
+  const [feedback, setFeedback] = useState(null), [layer, setLayer] = useState('');
   const owner = fc.data.parties?.find(party => party.id === asset.ownerPartyId)?.name || 'Unknown beneficiary';
   const disposalScope = `disposal:${asset.id}`;
-  const closeDisposal = () => { if (!fc.busy) { fc.clean(disposalScope); setDisposing(false); } };
+  const closeLayer = () => { if (!fc.busy && fc.canLeave()) { fc.discardChanges(); setLayer(''); } };
   const save = async (path, options, message) => {
     setFeedback(null);
     const result = await fc.run(async (api, workspaceId) => {
@@ -68,38 +68,49 @@ function AssetCard({ fc, asset, month }) {
     if (result) setFeedback({ text: message });
     return result;
   };
-  return <Panel className="asset-card" title={asset.name} description={`${asset.assetType} · cost ${asset.purchaseCost} ${asset.currency} · ${owner} × ${asset.ownershipShare}`}>
-    {asset.note && <div className="saved-note"><h3>Note</h3><p className="note-text">{asset.note}</p></div>}
-    {asset.disposedMonth && <p className="notice">Disposal recorded: {asset.disposedMonth}. Excluded from later months; earlier records remain.</p>}
-    <h3>Saved valuation · {month}</h3>
-    {current ? <dl className="record-details"><dt>Whole-asset value</dt><dd>{current.amount} {asset.currency} · {current.confirmed ? 'Confirmed' : 'Pending'}</dd><dt>Source</dt><dd>{current.source}</dd>{current.note && <><dt>Note</dt><dd className="note-text">{current.note}</dd></>}</dl> : <p>No valuation saved for this month. Purchase cost is not an automatic valuation.</p>}
-    {(!asset.disposedMonth || month <= asset.disposedMonth) && <ValuationForm key={`${month}/${current?.id || ''}`} fc={fc} asset={asset} month={month} current={current} save={save}/>}
-    {feedback && <p className={`notice ${feedback.error ? 'error' : 'success'}`} role={feedback.error ? 'alert' : 'status'}>{feedback.text}</p>}
-    {!asset.disposedMonth && <Button type="button" disabled={fc.busy || fc.readonly} onClick={() => setDisposing(true)}>Record disposal</Button>}
-    {disposing && <Dialog title={`Record disposal · ${asset.name}`} onClose={closeDisposal} dismissible={!fc.busy}>
+  return <><RecordRow className="asset-record" title={asset.name} meta={<>{asset.assetType} · Valuation {month}{asset.disposedMonth && <span> · Disposed {asset.disposedMonth}</span>}</>}
+    amount={current?.amount ?? 'Unknown'} currency={asset.currency} status={<Status state={asset.disposedMonth ? 'error' : current?.confirmed ? 'success' : 'warning'}>{asset.disposedMonth ? 'Disposed' : current?.confirmed ? 'Confirmed' : 'Pending'}</Status>}
+    actions={<><Button disabled={fc.busy} onClick={() => setLayer('details')}>Details</Button>{(!asset.disposedMonth || month <= asset.disposedMonth) && <Button disabled={fc.busy || fc.readonly} onClick={() => setLayer('valuation')}>{current ? 'Edit valuation' : 'Record valuation'}</Button>}</>}/>
+    {layer === 'details' && <Dialog title={asset.name} onClose={closeLayer}><div className="detail-context"><Status>Read only</Status></div>
+      <dl className="record-details"><dt>Asset type</dt><dd>{asset.assetType}</dd><dt>Purchase date</dt><dd>{asset.purchasedDate}</dd><dt>Purchase cost</dt><dd>{asset.purchaseCost} {asset.currency}</dd><dt>Beneficiary</dt><dd>{owner}</dd><dt>Ownership share</dt><dd>{asset.ownershipShare}</dd>
+        <dt>Saved valuation · {month}</dt><dd>{current?.amount ?? 'Unknown'} {asset.currency} · {current?.confirmed ? 'Confirmed' : 'Pending'}</dd><dt>Source</dt><dd>{current?.source || 'Unknown'}</dd>{current?.note && <><dt>Valuation note</dt><dd className="note-text">{current.note}</dd></>}{asset.disposedMonth && <><dt>Disposal recorded</dt><dd>{asset.disposedMonth}</dd></>}
+      </dl>{asset.note && <div className="saved-note"><h3>Note</h3><p className="note-text">{asset.note}</p></div>}
+      {!asset.disposedMonth && <Button disabled={fc.busy || fc.readonly} onClick={() => setLayer('disposal')}>Record disposal</Button>}
+    </Dialog>}
+    {layer === 'valuation' && <Dialog title={`Valuation · ${asset.name}`} onClose={closeLayer} dismissible={!fc.busy}>
+      <p className="detail-context">{month} · {asset.currency} · Value at month end</p><ValuationForm key={`${month}/${current?.id || ''}`} fc={fc} asset={asset} month={month} current={current} save={save}/>
+      {feedback && <p className={`notice ${feedback.error ? 'error' : 'success'}`} role={feedback.error ? 'alert' : 'status'}>{feedback.text}</p>}
+    </Dialog>}
+    {layer === 'disposal' && <Dialog title={`Record disposal · ${asset.name}`} onClose={closeLayer} dismissible={!fc.busy}>
       <p>This records the last month included in the asset register, not a deletion or a cash receipt. Its valuation for that month is still needed; later months exclude it.</p>
       <form onChangeCapture={() => fc.markDirty(disposalScope)} onSubmit={async event => {
         event.preventDefault(); const form = event.currentTarget, disposedMonth = new FormData(form).get('disposedMonth');
         const result = await save(`/non-financial-assets/${encodeURIComponent(asset.id)}`, { method: 'PUT', body: { ...asset, disposedMonth } }, `Disposal recorded for ${disposedMonth}. Earlier valuations and Note are retained.`);
-        if (result) { fc.clean(disposalScope); setDisposing(false); }
+        if (result) { fc.clean(disposalScope); setLayer(''); }
       }}><fieldset disabled={fc.busy || fc.readonly}><Field label="Last included month"><input name="disposedMonth" type="month" min={asset.purchasedDate.slice(0, 7)} defaultValue={month} required/></Field>
-        <div className="actions"><Button type="submit" primary>Save disposal</Button><Button type="button" onClick={closeDisposal}>Cancel</Button></div>
+        <div className="actions"><Button type="submit" primary>Save disposal</Button><Button type="button" onClick={closeLayer}>Cancel</Button></div>
       </fieldset></form>{feedback?.error && <p className="notice error" role="alert">{feedback.text}</p>}
     </Dialog>}
-  </Panel>;
+  </>;
 }
 
 export function AssetsLiabilities({ fc }) {
   const month = selectedMonth(fc.route), monthEnd = new Date(`${month}-01T00:00:00Z`);
   monthEnd.setUTCMonth(monthEnd.getUTCMonth() + 1, 0);
   const [query, setQuery] = useState(''), [sort, setSort] = useState('name'), [descending, setDescending] = useState(false);
+  const [registering, setRegistering] = useState(false);
+  const closeRegistry = () => { if (fc.canLeave()) { fc.discardChanges(); setRegistering(false); } };
   const partyOptions = (fc.data.parties || []).map(item => ({ value:item.id,label:item.name }));
   const currencyOptions = (fc.data.commodities || []).filter(item => item.kind === 'currency' && item.status === 'active').map(item => ({ value:item.code,label:item.code }));
   const linkedOptions = [{ value: '', label: 'No linked account' }, ...(fc.data.financialAccounts || []).filter(item => item.segment === 'living' && item.type === 'asset' && item.status === 'active').map(item => ({ value: item.id, label: `${item.code} · ${item.name}` }))];
   const columns = [['name', 'Asset name'], ['assetType', 'Asset type'], ['currency', 'Currency'], ['purchasedDate', 'Purchase date'], ['purchaseCost', 'Purchase cost']];
-  return <><Panel title="Non-financial asset registry" description="Register what you own and its purchase cost. Registration is independent of the valuation month; no depreciation or live market value is inferred."><ResourceForm fc={fc} initial={{ ownershipShare:'1' }} fields={[[ 'name','Asset name'],['assetType','Asset type'],['currency','Currency','text',currencyOptions],['purchasedDate','Purchase date','date'],['purchaseCost','Purchase cost'],['ownerPartyId','Beneficiary','text',partyOptions],['ownershipShare','Ownership share (0–1)'],['linkedAccountId','Linked Living asset account (optional)','text',linkedOptions],['valuationMethod','Valuation basis','text',[{value:'manual_market_value',label:'Manual market value'},{value:'cost',label:'Manually confirmed cost'}]],['note','Note','textarea']]} submitLabel="Register asset" onSave={values => fc.ledger('/non-financial-assets',{method:'POST',body:{...values,id:id('asset'),linkedAccountId:values.linkedAccountId || null}},'Asset registered. Its Note is shown on the saved asset card; add a valuation separately.')}/></Panel>
-    <Panel className="asset-valuations" title="Asset valuations" description="Choose the month whose closing value you can confirm. This does not change purchase dates or actual-date bank balances."><MonthPicker fc={fc} label="Valuation month (value at month end)"/><p>Values below refer to {monthEnd.toISOString().slice(0, 10)}, not today. If you do not know that value, leave it unrecorded; unknown is not zero.</p><ListControls label="Assets" columns={columns} sort={sort} setSort={setSort} descending={descending} setDescending={setDescending} query={query} setQuery={setQuery}/></Panel>
-    {orderedRecords(fc.data.assets || [], columns, sort, descending, query).map(item => <AssetCard key={item.id} fc={fc} asset={item} month={month}/>)}
+  const visibleAssets = orderedRecords(fc.data.assets || [], columns, sort, descending, query);
+  return <>
+    {registering && <Dialog title="Register asset" onClose={closeRegistry} dismissible={!fc.busy}><ResourceForm fc={fc} initial={{ ownershipShare:'1' }} fields={[[ 'name','Asset name'],['assetType','Asset type'],['currency','Currency','text',currencyOptions],['purchasedDate','Purchase date','date'],['purchaseCost','Purchase cost'],['ownerPartyId','Beneficiary','text',partyOptions],['ownershipShare','Ownership share (0–1)'],['linkedAccountId','Linked Living asset account (optional)','text',linkedOptions],['valuationMethod','Valuation basis','text',[{value:'manual_market_value',label:'Manual market value'},{value:'cost',label:'Manually confirmed cost'}]],['note','Note','textarea']]} submitLabel="Register asset" onSave={async values => { const result = await fc.ledger('/non-financial-assets',{method:'POST',body:{...values,id:id('asset'),linkedAccountId:values.linkedAccountId || null}},'Asset registered. Add a valuation separately.'); if(result) setRegistering(false); return result; }}/></Dialog>}
+    <Panel className="asset-valuations" title="Asset valuations" description={`Whole-asset values at ${monthEnd.toISOString().slice(0, 10)}, not today. Purchase cost is not an automatic valuation. Unknown is not zero.`} action={<Button primary disabled={fc.busy || fc.readonly} onClick={() => setRegistering(true)}>Register asset</Button>}>
+      <MonthPicker fc={fc} label="Valuation month"/><ListControls label="Assets" columns={columns} sort={sort} setSort={setSort} descending={descending} setDescending={setDescending} query={query} setQuery={setQuery}/>
+      <div className="workbench-records">{visibleAssets.map(item => <AssetCard key={item.id} fc={fc} asset={item} month={month}/>)}</div>{!visibleAssets.length && <Empty>{fc.data.assets?.length ? 'No assets match these filters.' : 'No assets registered.'}</Empty>}
+    </Panel>
     <Panel title="Personal liabilities" description="Liabilities use actual-date balance records, not a second transaction system."><Table rows={(fc.data.financialAccounts || []).filter(item => item.segment === 'living' && item.type === 'liability')} columns={[[ 'name','Liability'],['ownerPartyId','Debtor', item => fc.data.parties?.find(party => party.id === item.ownerPartyId)?.name || 'Unknown beneficiary'],['allowedCommodityCodes','Currency']]}/><Button onClick={() => fc.navigate('balances','','living')}>Record liability balances</Button></Panel></>;
 }
 

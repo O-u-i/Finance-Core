@@ -1,5 +1,5 @@
-export const API_VERSION = '3.6.0';
-export const SERVICE_VERSION = '3.6.0';
+export const API_VERSION = '3.7.0';
+export const SERVICE_VERSION = '3.7.0';
 export const id = (prefix) => `${prefix}-${crypto.randomUUID()}`;
 export const localDate = () => {
   const date = new Date();

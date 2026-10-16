@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { id } from '../api.js';
-import { selectedRecordedMonth, shanghaiDate } from '../navigation.js';
-import { Button, Dialog, Empty, Field, MonthPicker, Panel, Select, Table } from '../components.jsx';
+import { selectedMonth, selectedRecordedMonth, shanghaiDate } from '../navigation.js';
+import { Button, Dialog, Empty, Field, Help, MonthPicker, Panel, RecordRow, Select, Status, Table } from '../components.jsx';
 import SnapshotHistory from '../SnapshotHistory.jsx';
-import { PersonalMonthlyReview, PersonalOverview } from './PersonalFinance.jsx';
+import { currentObservation, PersonalMonthlyReview, PersonalOverview } from './PersonalFinance.jsx';
 
 const codeOrder = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
 const livingAccounts = fc => (fc.data.financialAccounts || []).filter(item => item.segment === 'living').sort((a, b) => codeOrder.compare(a.code, b.code));
@@ -35,12 +35,13 @@ export function BalanceForm({ fc, accounts, opening = false }) {
 }
 
 export function RecordedBalances({ fc }) {
+  const [recording, setRecording] = useState(false);
+  const closeForm = () => { if (fc.canLeave()) { fc.discardChanges(); setRecording(false); } };
   const accounts = livingAccounts(fc);
   const legacy = (fc.data.observations || []).filter(item => item.kind === 'balance' && !item.observedDate);
   return <>
-    <Panel title="Record a balance" description="Use the actual balance date, any day. Multiple records on the same day are retained; no detailed spending transactions are required." action={<Button onClick={() => fc.navigate('master', 'accounts', 'living')}>Manage accounts</Button>}>
-      {accounts.length ? <BalanceForm fc={fc} accounts={accounts}/> : <Empty>No Living accounts registered.</Empty>}
-    </Panel>
+    <div className="actions report-actions"><Button primary disabled={fc.busy || fc.readonly || !accounts.length} onClick={() => setRecording(true)}>Record a balance</Button><Button onClick={() => fc.navigate('master', 'accounts', 'living')}>Manage accounts</Button></div>
+    {recording && <Dialog title="Record a balance" onClose={closeForm} dismissible={!fc.busy}><BalanceForm fc={fc} accounts={accounts}/></Dialog>}
     <Panel title="Latest balances" description="One latest actual-date record per account. This is not a month-end balance sheet; missing values are unknown.">
       <SnapshotHistory dated records={fc.data.balanceRecords || []} accounts={accounts}/>
     </Panel>
@@ -79,9 +80,36 @@ export function RecordedBalanceReadout({ report, parties = [], filterable = fals
 }
 
 export function FinanceOverview({ fc }) {
-  return <><PersonalOverview fc={fc}/>{!fc.migrationRequired && <Panel className="recorded-review" title="Living · dated balance readout" description="These recorded balances are separate from the formal month-end net-worth calculation above.">
-    <RecordedBalanceReadout report={fc.data.recordedReport} parties={fc.data.parties}/>
-  </Panel>}</>;
+  const month = selectedMonth(fc.route), [detail, setDetail] = useState(null);
+  const journal = (fc.data.entries || []).filter(item => item.date.slice(0, 7) === month).map(item => ({
+    id: `journal/${item.id}`, title: item.description, meta: `Investment · Journal · ${item.date} · Immutable`,
+    status: item.reversalOf ? 'Linked reversal' : 'Posted', state: item.reversalOf ? 'warning' : 'success',
+    currency: item.balancingCommodityCode, date: item.date, entry: item,
+  }));
+  const balances = (fc.data.recordedReport?.accounts || []).map(item => ({
+    id: `balance/${item.accountId}`, title: item.name, meta: `Living · ${item.code} · ${item.observedDate || 'Actual date unknown'}`,
+    amount: item.amount ?? 'Unknown', currency: item.currency, date: item.observedDate || '',
+    status: item.status === 'confirmed' ? 'Confirmed' : item.status === 'pending' ? 'Pending' : 'Unknown',
+    state: item.status === 'confirmed' ? 'success' : 'warning', balance: item,
+  }));
+  const assets = (fc.data.assets || []).filter(item => item.purchasedDate.slice(0, 7) <= month).map(asset => {
+    const value = currentObservation(fc, 'valuation', asset.id, month);
+    return { id: `asset/${asset.id}`, title: asset.name, meta: `Living · ${asset.assetType} · Valuation ${month}`, amount: value?.amount ?? 'Unknown',
+      currency: asset.currency, date: month, status: asset.disposedMonth ? 'Disposed' : value?.confirmed ? 'Confirmed' : 'Pending',
+      state: asset.disposedMonth ? 'error' : value?.confirmed ? 'success' : 'warning', asset, value };
+  });
+  const records = [...journal, ...balances, ...assets].sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
+  const [shown, setShown] = useState(20);
+  return <><div className="overview-heading"><h1>Overview</h1><MonthPicker fc={fc} label="Record month" value={month}/></div>
+    <Panel title="Records" description="Posted Investment entries, actual-date Living balances and month-end manual valuations. These are different record bases, not a combined financial total. Unknown is not zero.">
+      <div className="workbench-records">{records.slice(0, shown).map(record => <RecordRow key={record.id} title={record.title} meta={record.meta} amount={record.amount} currency={record.currency} status={<Status state={record.state}>{record.status}</Status>} actions={<Button onClick={() => setDetail(record)}>Details</Button>}/>)}</div>
+      {!records.length && <Empty>No records for {month}.</Empty>}{shown < records.length && <Button onClick={() => setShown(shown + 20)}>Show more records</Button>}
+    </Panel>
+    <details className="overview-readouts"><summary>Financial readouts <Help label="Financial readouts">Read-only month-end calculations. Investment pool assets are not personal wealth; currencies and third-party interests remain separate.</Help></summary><PersonalOverview fc={fc}/>{!fc.migrationRequired && <Panel className="recorded-review" title="Living · dated balance readout"><RecordedBalanceReadout report={fc.data.recordedReport} parties={fc.data.parties}/></Panel>}</details>
+    {detail && <Dialog title={detail.title} onClose={() => setDetail(null)}><div className="detail-context"><Status>Read only</Status><span>{detail.meta}</span></div>
+      {detail.entry ? <><p>Immutable · {detail.status}</p><Table caption="Journal postings" rows={detail.entry.postings} columns={[[ 'accountId', 'Account', item => fc.data.accounts?.find(account => account.id === item.accountId)?.name || item.accountId], ['side', 'Side'], ['units', 'Units'], ['commodityCode', 'Currency']]}/></> : <dl className="record-details"><dt>{detail.asset ? 'Whole-asset valuation' : 'Recorded balance'}</dt><dd>{detail.amount} {detail.currency}</dd><dt>Status</dt><dd>{detail.status}</dd>{detail.asset ? <><dt>Valuation month</dt><dd>{month}</dd><dt>Purchase cost</dt><dd>{detail.asset.purchaseCost} {detail.currency}</dd><dt>Ownership share</dt><dd>{detail.asset.ownershipShare}</dd><dt>Source</dt><dd>{detail.value?.source || 'Unknown'}</dd><dt>Note</dt><dd className="note-text">{detail.asset.note || '—'}</dd></> : <><dt>Actual balance date</dt><dd>{detail.balance.observedDate || 'Unknown'}</dd><dt>Previous record date</dt><dd>{detail.balance.previousDate || 'Unknown'}</dd><dt>Balance change only</dt><dd>{detail.balance.change ?? 'Unknown'}</dd></>}</dl>}
+    </Dialog>}
+  </>;
 }
 
 export function RecordedLivingReview({ fc }) {

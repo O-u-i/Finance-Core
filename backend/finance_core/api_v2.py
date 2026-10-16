@@ -55,6 +55,7 @@ from finance_core.contracts_v3 import (
     RecurringEntryRuleMutationResponse,
     STANDARD_ERROR_RESPONSES,
     TAccountListResponse,
+    TAccountPostingResponse,
     WorldResponse,
 )
 from finance_core.ledger_repository import LedgerRepository, dump
@@ -148,6 +149,7 @@ class LedgerContractRouter(APIRouter):
             ("/recurring-entry-rules/{rule_id}", "PUT"): RecurringEntryRuleMutationResponse,
             ("/recurring-entry-rules/{rule_id}", "DELETE"): RecurringEntryRuleDeleteResponse,
             ("/t-accounts", "GET"): TAccountListResponse,
+            ("/t-accounts/{account_id}/postings", "GET"): TAccountPostingResponse,
             ("/dashboard", "GET"): DashboardResponse,
             ("/financial-statements", "GET"): FinancialStatementListResponse,
             ("/cash-flow", "GET"): CashFlowResponse,
@@ -650,6 +652,17 @@ def create_v2_router(
     @router.get("/t-accounts")
     def t_accounts(request: Request) -> dict[str, Any]:
         return {"data": repo(request).account_flows()}
+
+    if prefix.startswith("/api/v3/workspaces/"):
+        @router.get("/t-accounts/{account_id}/postings")
+        def t_account_postings(
+            account_id: str, request: Request, commodity_code: str = Query(alias="commodityCode", min_length=1),
+            offset: int = Query(default=0, ge=0), limit: int = Query(default=50, ge=1, le=200),
+        ) -> dict[str, Any]:
+            try:
+                return repo(request).account_postings(account_id, commodity_code, offset, limit)
+            except LookupError as error:
+                raise translate(error) from error
 
     @router.get("/dashboard")
     def dashboard(request: Request) -> dict[str, Any]:

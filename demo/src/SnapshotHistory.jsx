@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Button, ListControls, Select, Table } from './components.jsx';
+import { Button, Dialog, Empty, Help, ListControls, RecordRow, Select, Status, Table } from './components.jsx';
 import { orderedRecords } from './records.js';
 
 const pageSize = 10;
@@ -34,6 +34,7 @@ function HistoryRows({ records, columns }) {
 }
 
 export default function SnapshotHistory({ records = [], accounts = [], legacy = false, dated = false }) {
+  const [detail, setDetail] = useState(null);
   const [filter, setFilter] = useState(''), [requestedPage, setPage] = useState(0);
   const [sort, setSort] = useState('account'), [descending, setDescending] = useState(false), [query, setQuery] = useState('');
   const byId = new Map(accounts.map(item => [item.id, item]));
@@ -64,10 +65,11 @@ export default function SnapshotHistory({ records = [], accounts = [], legacy = 
   return <div className="snapshot-list">
     <div className="snapshot-toolbar"><Select label="Account filter" value={filter} onChange={value => { setFilter(value); setPage(0); }} options={[
       { value: '', label: 'All accounts' }, ...latest.map(item => ({ value: item.identity, label: names.get(item.identity) || 'Archived / unregistered account' })),
-    ]}/><p>{groups.size} accounts · {records.length} recorded snapshots. Latest record per account shown; {dated ? 'balance dates are actual dates, not month ends.' : legacy ? 'submission dates are not balance dates.' : 'actual balance dates are unknown.'}</p></div>
+    ]}/><Help label="Latest balances">{`${groups.size} accounts, ${records.length} snapshots. Latest record per account shown; ${dated ? 'balance dates are actual dates, not month ends.' : legacy ? 'submission dates are not balance dates.' : 'actual balance dates are unknown.'}`}</Help>{!!records.length && <Button onClick={() => setDetail('all')}>Snapshot history</Button>}</div>
     <ListControls label="Snapshots" columns={columns} sort={sort} setSort={value => { setSort(value); setPage(0); }} descending={descending} setDescending={value => { setDescending(value); setPage(0); }} query={query} setQuery={value => { setQuery(value); setPage(0); }}/>
-    <Table controls={false} caption="Latest balance snapshots" rows={visible.slice(page * pageSize, (page + 1) * pageSize)} rowKey="id" columns={columns}/>
+    <div className="workbench-records">{visible.slice(page * pageSize, (page + 1) * pageSize).map(item => <RecordRow key={item.id} title={names.get(item.identity) || 'Archived / unregistered account'} meta={<>{byId.get(item.identity)?.code} · {dated ? item.observedDate : legacy ? dateLabel(item.recordedAt) : `${item.month} · Actual date unknown`}</>} amount={item.amount ?? item.balance} currency={item.currency || item.commodityCode} status={<Status state={legacy ? 'neutral' : item.confirmed ? 'success' : 'warning'}>{legacy ? 'Recorded' : item.confirmed ? 'Confirmed' : 'Pending'}</Status>} actions={<Button onClick={() => setDetail(item.identity)}>Details</Button>}/>)}</div>
+    {!visible.length && <Empty>No balances match.</Empty>}
     <Pager page={page} pages={pages} onChange={setPage}/>
-    {!!records.length && <details className="snapshot-history"><summary>Snapshot history · {history.length} records</summary><HistoryRows key={`${filter}/${sort}/${descending}/${query}`} records={history} columns={columns}/></details>}
+    {detail && <Dialog title={detail === 'all' ? 'Snapshot history' : `${names.get(detail) || 'Account'} · balance history`} onClose={() => setDetail(null)}><div className="detail-context"><Status>Read only</Status></div><HistoryRows key={`${detail}/${filter}/${sort}/${descending}/${query}`} records={history.filter(item => detail === 'all' || (item.subjectId || item.accountId) === detail)} columns={columns}/></Dialog>}
   </div>;
 }
