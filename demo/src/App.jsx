@@ -1,9 +1,9 @@
 import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { useFinance, views } from './state.jsx';
-import { segmentViews, configurationViews } from './navigation.js';
+import { segmentViews, configurationViews, masterSections } from './navigation.js';
 import { SERVICE_VERSION } from './api.js';
 import { Button, Field, Logo, Panel, Select, StepContent } from './components.jsx';
-import LineSidebar from './LineSidebar.jsx';
+import BranchedMenu from './BranchedMenu.jsx';
 // Authentication does not need to download or transform Workspace forms and CSV tooling.
 const named = (load, name) => lazy(() => load().then(module => ({ default: module[name] })));
 const Setup = lazy(() => import('./pages/Setup.jsx'));
@@ -39,12 +39,60 @@ function Wizard({ fc }) {
 }
 export default function App() {
   const fc = useFinance(); const [menu, setMenu] = useState(false);
+  const [sections, setSections] = useState([]), [activeSection, setActiveSection] = useState('');
+  const [sectionHistory, setSectionHistory] = useState({}), [pendingSection, setPendingSection] = useState(null);
   useEffect(() => { setMenu(false); }, [fc.route.view]);
   const segment = fc.route.segment || (['balances','assets','plans','livingreview','livingdata'].includes(fc.route.view) ? 'living' : 'investment');
   const globalPage = configurationViews.includes(fc.route.view);
   const navKeys = fc.migrationRequired && segment === 'living' ? ['planning'] : segmentViews[segment];
   const Page = fc.route.view === 'monthlyreview' && (!fc.route.segment || fc.migrationRequired) ? MonthlyReview : pages[fc.route.view];
   const blocked = !fc.setup.ready && !configurationViews.includes(fc.route.view);
+  useEffect(() => {
+    const main = document.getElementById('main-content');
+    if (!main) return;
+    const collect = () => {
+      if (!main.isConnected || main.dataset.page !== fc.route.view || main.dataset.tab !== fc.route.tab) return;
+      const next = [...main.querySelectorAll('[data-section-title]')].filter(node => !node.closest('dialog') && !node.parentElement.closest('[data-section-title]')).map(node => ({ key:node.id, label:node.dataset.sectionTitle }));
+      setSections(current => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+      if (next.length) {
+        const scope = `${fc.workspace.id}/${segment}/${fc.route.view}`;
+        const headings = next.map(item => ({ key:`${fc.route.view}::${item.label}`, label:item.label }));
+        setSectionHistory(current => JSON.stringify(current[scope]) === JSON.stringify(headings) ? current : {...current,[scope]:headings});
+      }
+    };
+    collect(); setActiveSection('');
+    const observer = new MutationObserver(collect); observer.observe(main, { childList:true, subtree:true, characterData:true });
+    return () => observer.disconnect();
+  }, [fc.session, fc.workspace?.id, fc.route.view, fc.route.tab, fc.route.segment]);
+  const locateSection = key => {
+    const node = document.getElementById(key);
+    if (!node) return;
+    for (let ancestor = node.parentElement; ancestor; ancestor = ancestor.parentElement) if (ancestor.tagName === 'DETAILS') ancestor.open = true;
+    const clearance = Math.max(innerHeight / 4, (document.querySelector('.workbench-nav')?.getBoundingClientRect().bottom || 0) + 24);
+    window.scrollTo({ top:Math.max(0, scrollY + node.getBoundingClientRect().top - clearance), behavior:'instant' });
+    setActiveSection(fc.route.view === 'settings' ? key : `${fc.route.view}::${node.dataset.sectionTitle}`); node.querySelector('h2')?.focus({ preventScroll:true });
+  };
+  useEffect(() => {
+    if (!pendingSection || fc.loading) return;
+    if (pendingSection.view !== fc.route.view) { setPendingSection(null); return; }
+    if (!sections.length) return;
+    const nodes = [...document.querySelectorAll('#main-content [data-section-title]')];
+    if (!nodes.length) return; // A lazy page may still be replacing its Suspense fallback.
+    const target = nodes.find(node => node.dataset.sectionTitle === pendingSection.title);
+    if (target) locateSection(target.id);
+    else fc.setNotice({error:true,text:'This section is not available in the current page state.'});
+    setPendingSection(null);
+  }, [pendingSection,fc.route.view,fc.loading,sections]);
+  const selectSection = (key,kid,view) => {
+    if (view === fc.route.view) {
+      const target = sections.find(item => item.label === kid.label);
+      if (target) locateSection(target.key);
+    } else if (fc.navigate(view,'',segment)) setPendingSection({view,title:kid.label});
+  };
+  const configItems = masterSections(fc.migrationRequired);
+  const activeMaster = configItems.some(([key]) => key === fc.route.tab) ? fc.route.tab : 'commodities';
+  const railItems = fc.route.view === 'master' ? configItems.map(([key,label]) => ({key,label})) : fc.route.view === 'settings' ? sections : navKeys.map(key => ({key,label:views[key][0],children:sectionHistory[`${fc.workspace?.id}/${segment}/${key}`] || []}));
+  const hasRail = fc.route.view !== 'overview';
   return <><a href="#main-content" className="skip-link" onClick={(e) => { e.preventDefault(); document.querySelector('#main-content')?.focus(); }}>Skip to content</a>
     {fc.notice && <div className={`global-notice notice ${fc.notice.error ? 'error' : 'success'}`} role={fc.notice.error ? 'alert' : 'status'}><span>{fc.notice.text}</span><Button aria-label="Dismiss notification" onClick={() => fc.setNotice(null)}>×</Button></div>}
     {fc.session === 'unavailable' && <div className="connection-state"><Logo/><h1>Finance Core is unavailable</h1><p>Start the local backend and try again.</p><Button primary onClick={fc.bootstrap}>Retry connection</Button><Button disabled={fc.busy} onClick={fc.signOut}>Forget saved sign-in</Button></div>}
@@ -60,9 +108,9 @@ export default function App() {
         <div className="segment-entries">{['investment','living'].map(value => <button key={value} data-segment={value} disabled={fc.busy} aria-current={!globalPage && segment === value ? 'page' : undefined} onClick={() => fc.navigate(value === 'living' ? (fc.migrationRequired ? 'planning' : 'balances') : 'journal','',value)}>{value === 'living' ? 'Living' : 'Investment'}</button>)}</div>
         <div className="global-entries">{configurationViews.filter(key => key !== 'overview').map(key => <button key={key} disabled={fc.busy} aria-current={fc.route.view === key ? 'page' : undefined} onClick={() => fc.navigate(key)}>{views[key][0]}{key === 'master' && !fc.setup.masterReady && <span className="setup-required">Setup required</span>}</button>)}</div>
       </nav>
-      <div className={`workbench-layout${globalPage ? ' workbench-global' : ''}`}>
-      {!globalPage && <aside className={`workbench-rail${menu ? ' open' : ''}`}><Button aria-expanded={menu} aria-controls="main-navigation" className="rail-toggle" disabled={fc.busy} onClick={() => setMenu(!menu)}>Pages <span aria-hidden="true">{menu ? '−' : '+'}</span></Button><div className="rail-content" id="main-navigation"><p className="rail-title">{segment === 'living' ? 'Living' : 'Investment'}</p><LineSidebar items={navKeys.map(key => ({ key, label: views[key][0] }))} activeKey={fc.route.view} disabled={fc.busy || !fc.setup.ready} onNavigate={key => fc.navigate(key, '', segment)}/></div></aside>}
-      <main id="main-content" tabIndex={-1} key={fc.workspace.id} aria-busy={fc.busy || fc.loading}>
+      <div className={`workbench-layout${!hasRail ? ' workbench-global' : ''}`}>
+      {hasRail && <aside className={`workbench-rail${menu ? ' open' : ''}`}><Button aria-expanded={menu} aria-controls="main-navigation" className="rail-toggle" disabled={fc.busy} onClick={() => setMenu(!menu)}>Pages <span aria-hidden="true">{menu ? '−' : '+'}</span></Button><div className="rail-content" id="main-navigation"><p className="rail-title">{globalPage ? views[fc.route.view][0] : segment === 'living' ? 'Living' : 'Investment'}</p><BranchedMenu items={railItems} activeKey={fc.route.view === 'master' ? activeMaster : fc.route.view === 'settings' ? activeSection : fc.route.view} activeSection={activeSection} label={globalPage ? `${views[fc.route.view][0]} sections` : 'Segment pages'} disabled={fc.busy || fc.loading || (!globalPage && !fc.setup.ready)} onSection={selectSection} onNavigate={key => fc.route.view === 'settings' ? locateSection(key) : fc.route.view === 'master' ? fc.navigate('master',key,segment) : fc.navigate(key,'',segment)}/></div></aside>}
+      <main id="main-content" data-page={fc.route.view} data-tab={fc.route.tab} tabIndex={-1} key={fc.workspace.id} aria-busy={fc.busy || fc.loading}>
         {fc.route.view !== 'overview' && <div className="page-heading"><h1>{views[fc.route.view][0]}</h1>{fc.readonly && <span className="badge">Read only</span>}</div>}
         {fc.readonly && <p className="notice">Archived workspace · records are read-only. Restore it in Settings to make changes.</p>}
         {(fc.busy || fc.loading) && <div className="loading-line" role="status">{fc.busy ? 'Applying operation…' : 'Loading records…'}</div>}

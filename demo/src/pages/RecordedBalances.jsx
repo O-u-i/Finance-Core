@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
+import OverviewCharts from '../OverviewCharts.jsx';
 import { id } from '../api.js';
 import { selectedMonth, selectedRecordedMonth, shanghaiDate } from '../navigation.js';
-import { Button, Dialog, Empty, Field, Help, MonthPicker, Panel, RecordRow, Select, Status, Table } from '../components.jsx';
+import { Button, Dialog, Empty, Field, Help, MonthPicker, Panel, RecordRow, Select, Status, SummaryCards, Table } from '../components.jsx';
 import SnapshotHistory from '../SnapshotHistory.jsx';
 import { currentObservation, PersonalMonthlyReview, PersonalOverview } from './PersonalFinance.jsx';
 
@@ -61,12 +62,12 @@ export function RecordedBalanceReadout({ report, parties = [], filterable = fals
     {filterable && <div className="snapshot-toolbar"><Select name="reviewAccountFilter" label="Account filter" value={accountFilter} onChange={setAccountFilter} options={[
       { value: '', label: 'All accounts' }, ...report.accounts.map(item => ({ value: item.accountId, label: `${item.code} · ${item.name}` })),
     ]}/></div>}
-    <Table caption="Dated monthly balance review" rows={rows} rowKey="accountId" columns={[
+    <SummaryCards label="Dated monthly balance review" rows={rows} columns={[
       ['code', 'Account', item => <><strong>{item.code} · {item.name}</strong><small>{item.type} · {parties.find(party => party.id === item.ownerPartyId)?.name || 'Unknown beneficiary'}</small></>, item => `${item.code} ${item.name}`],
       ['currency', 'Currency'], ['observedDate', 'Latest record date', item => item.observedDate || 'Unknown'],
       ['amount', 'Recorded balance', item => item.amount ?? 'Unknown'],
       ['change', 'Balance change only', item => item.change ?? 'Unknown'],
-      ['status', 'Status', item => item.status === 'unknown' ? 'Unknown' : item.status === 'pending' ? 'Pending' : 'Confirmed'],
+      ['status', 'Status', item => <Status state={item.status === 'confirmed' ? 'success' : 'warning'}>{item.status === 'unknown' ? 'Unknown' : item.status === 'pending' ? 'Pending' : 'Confirmed'}</Status>],
       ['details', 'Details', item => <Button type="button" onClick={() => setDetails(item)}>Details</Button>],
     ]}/>
     {details && <Dialog title={`${details.code} · balance comparison`} onClose={() => setDetails(null)}>
@@ -101,6 +102,7 @@ export function FinanceOverview({ fc }) {
   const records = [...journal, ...balances, ...assets].sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
   const [shown, setShown] = useState(20);
   return <><div className="overview-heading"><h1>Overview</h1><MonthPicker fc={fc} label="Record month" value={month}/></div>
+    <OverviewCharts records={records}/>
     <Panel title="Records" description="Posted Investment entries, actual-date Living balances and month-end manual valuations. These are different record bases, not a combined financial total. Unknown is not zero.">
       <div className="workbench-records">{records.slice(0, shown).map(record => <RecordRow key={record.id} title={record.title} meta={record.meta} amount={record.amount} currency={record.currency} status={<Status state={record.state}>{record.status}</Status>} actions={<Button onClick={() => setDetail(record)}>Details</Button>}/>)}</div>
       {!records.length && <Empty>No records for {month}.</Empty>}{shown < records.length && <Button onClick={() => setShown(shown + 20)}>Show more records</Button>}

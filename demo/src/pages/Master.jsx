@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { id } from '../api.js';
 import AccountRegistry from './AccountRegistry.jsx';
-import { Button, Panel, ResourceForm, Table, Tabs, options } from '../components.jsx';
+import { Button, Panel, ResourceForm, Table, options } from '../components.jsx';
 import Arrangements from './Arrangements.jsx';
 import OpeningBalances from './OpeningBalances.jsx';
+import { masterSections } from '../navigation.js';
 
 export default function Master({ fc }) {
   const [editing, setEditing] = useState(null);
   const [formVersion, setFormVersion] = useState(0);
   const legacy = !!fc.migrationRequired;
-  const items = [['commodities', 'Commodities'], ['accounts', 'Accounts'], ['prices', 'Prices'], ...(!legacy ? [['opening','Opening balances'], ['ownership','Ownership & agreements']] : [])];
+  const items = masterSections(legacy);
   const tab = items.some(([key]) => key === fc.route.tab) ? fc.route.tab : 'commodities';
   React.useEffect(() => { setEditing(null); }, [tab]);
   const commodityOptions = (fc.data.commodities || []).filter((item) => item.status === 'active').map((item) => ({ value: item.code, label: `${item.code} · ${item.name}` }));
@@ -20,7 +21,7 @@ export default function Master({ fc }) {
     if (result) { setEditing(null); setFormVersion(value => value + 1); fc.discardChanges(); }
   };
   const edit = (item) => { if (fc.canLeave()) { setEditing(item); fc.discardChanges(); } };
-  return <><Tabs items={items} value={tab} onChange={(value) => fc.navigate('master', value)}/>
+  return <>
     {tab === 'commodities' && <Panel title={editing ? 'Edit commodity' : 'Commodity registry'} description="Currencies, securities and other units used by this ledger." action={editing && <Button onClick={() => { if (fc.canLeave()) { setEditing(null); fc.discardChanges(); } }}>Cancel edit</Button>}>
       <ResourceForm key={`${editing?.code || 'new'}/${formVersion}`} fc={fc} immutable={editing ? ['code'] : []} initial={editing || { kind: 'currency', scale: 2 }} fields={[
         ['code', 'Code'], ['name', 'Name'], ['kind', 'Kind', 'text', options(['currency', 'security', 'other'])], ['scale', 'Decimal scale', 'number'],

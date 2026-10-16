@@ -8,9 +8,9 @@ function Balance({ fc, item }) {
   return <form className="balance-form" onSubmit={async (event) => { event.preventDefault(); if (await fc.ledger(`/living-accounts/${encodeURIComponent(item.id)}/record-balance`, { method: 'POST', body: { balance } }, 'Balance and snapshot recorded.')) fc.clean(`balance:${item.id}`); }}><Field label={`New balance for ${item.name}`} inputMode="decimal" disabled={fc.busy || fc.readonly} value={balance} onChange={(e) => { setBalance(e.target.value); fc.markDirty(`balance:${item.id}`); }}/><Button disabled={fc.busy || fc.readonly}>Record</Button></form>;
 }
 export default function Planning({ fc }) {
-  const items = fc.route.view === 'plans' ? [['plans','Monthly plans (not actuals)']] : [['accounts', 'Living accounts'], ['snapshots', 'Snapshots'], ['plans', 'Monthly plans'], ['summary', 'Summary']];
+  const items = fc.route.view === 'plans' ? [['plans','Cash-flow plans (not actuals)']] : [['accounts', 'Living accounts'], ['snapshots', 'Snapshots'], ['plans', 'Cash-flow plans'], ['summary', 'Summary']];
   const tab = items.some(([key]) => key === fc.route.tab) ? fc.route.tab : items[0][0];
-  return <><Tabs items={items} value={tab} onChange={(value) => fc.navigate(fc.route.view === 'plans' ? 'plans' : 'planning', value)}/>
+  return <>{fc.route.view !== 'plans' && <Tabs items={items} value={tab} onChange={(value) => fc.navigate('planning', value)}/>}
     {tab === 'accounts' && <Panel title="Living accounts" description="Capture balances explicitly and keep a history of snapshots.">
       <Button onClick={() => fc.navigate('master', 'accounts', 'living')}>Register accounts in Master data</Button>
       <Table rows={fc.data.living} columns={[["name", "Name"], ["balance", "Balance"], ["commodityCode", "Currency"], ["record", "Record balance", item => <Balance key={item.updatedAt} fc={fc} item={item}/>]]}/>

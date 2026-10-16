@@ -56,6 +56,7 @@ exports/
 
 # Private media and planning files
 *.png
+!docs/architecture/finance-core-overview/finance-core-overview-light-2048.png
 *.jpg
 *.jpeg
 *.gif

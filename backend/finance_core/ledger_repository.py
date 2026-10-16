@@ -45,12 +45,12 @@ class LedgerRepository:
     MUTABLE_TABLES = [
         "commodities_v2", "accounts_v2", "price_quotes_v2", "journal_drafts_v2",
         "journal_entries_v2", "postings_v2", "lots_v2", "lot_movements_v2",
-        "recurring_entry_rules_v2", "living_accounts_v2", "living_snapshots_v2", "monthly_plans_v2",
+        "recurring_entry_rules_v2", "living_accounts_v2", "living_snapshots_v2", "monthly_plans_v2", "app_metadata",
     ]
     MUTABLE_DELETE_ORDER = [
         "lot_movements_v2", "lots_v2", "postings_v2", "journal_entries_v2",
         "price_quotes_v2", "journal_drafts_v2", "recurring_entry_rules_v2",
-        "living_snapshots_v2", "monthly_plans_v2", "living_accounts_v2", "accounts_v2", "commodities_v2",
+        "living_snapshots_v2", "monthly_plans_v2", "living_accounts_v2", "accounts_v2", "commodities_v2", "app_metadata",
     ]
 
     def __init__(self, connection: sqlite3.Connection):
@@ -275,11 +275,15 @@ class LedgerRepository:
 
     def list_monthly_plans(self) -> list[MonthlyPlanV2]:
         rows = self.connection.execute("SELECT * FROM monthly_plans_v2 ORDER BY kind,start_date,id").fetchall()
+        # Schedule metadata uses the existing key/value store; notes and schema stay unchanged.
+        intervals = {row['key'].removeprefix('plan-repeat-months:'): json.loads(row['value']) for row in
+                     self.connection.execute("SELECT key,value FROM app_metadata WHERE key LIKE 'plan-repeat-months:%'")}
         return [MonthlyPlanV2.model_validate({
             "id": row["id"], "kind": row["kind"], "name": row["name"], "amount": row["amount"],
             "commodityCode": row["commodity_code"], "category": row["category"],
             "recurringMonthly": bool(row["recurring_monthly"]), "dayOfMonth": row["day_of_month"],
             "startDate": row["start_date"], "note": row["note"],
+            "repeatEveryMonths": intervals.get(row['id'], 1),
         }) for row in rows]
 
     def save_monthly_plan(self, item: MonthlyPlanV2, *, create: bool) -> MonthlyPlanV2:
@@ -288,8 +292,8 @@ class LedgerRepository:
             item.kind, item.name, item.amount, item.commodity_code, item.category,
             int(item.recurring_monthly), item.day_of_month, item.start_date, item.note,
         )
-        before = self._mutable_snapshot()
         with transaction(self.connection):
+            before = self._mutable_snapshot()
             if create:
                 self.connection.execute(
                     "INSERT INTO monthly_plans_v2(id,kind,name,amount,commodity_code,category,recurring_monthly,day_of_month,start_date,note) VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -302,14 +306,21 @@ class LedgerRepository:
                 )
                 if result.rowcount == 0:
                     raise LookupError("Monthly plan was not found.")
+            key = 'plan-repeat-months:' + item.id
+            if item.repeat_every_months == 1:
+                self.connection.execute('DELETE FROM app_metadata WHERE key=?', (key,))
+            else:
+                self.connection.execute('INSERT INTO app_metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                                        (key, json.dumps(item.repeat_every_months)))
             self._save_undo(before)
         return item
 
     def delete_monthly_plan(self, plan_id: str) -> bool:
-        before = self._mutable_snapshot()
         with transaction(self.connection):
+            before = self._mutable_snapshot()
             deleted = self.connection.execute("DELETE FROM monthly_plans_v2 WHERE id=?", (plan_id,)).rowcount > 0
             if deleted:
+                self.connection.execute('DELETE FROM app_metadata WHERE key=?', ('plan-repeat-months:' + plan_id,))
                 self._save_undo(before)
             return deleted
 
@@ -711,6 +722,7 @@ class LedgerRepository:
         with transaction(self.connection):
             before = self._mutable_snapshot()
             counts = ledger_backup.restore_backup(self.connection, backup)
+            self.list_monthly_plans()  # Validate persisted schedule metadata inside the restore transaction.
             from finance_core.opening_balances import validate_opening_history
             validate_opening_history(self.list_entries(), self.list_drafts(include_posted=True),
                                      {a.id: a for a in self.list_accounts()}, {c.code: c for c in self.list_commodities()})
@@ -735,6 +747,9 @@ class LedgerRepository:
         with transaction(self.connection):
             self.connection.execute("PRAGMA defer_foreign_keys=ON")
             tables = self._mutable_tables()
+            if set(snapshot) == set(tables) - {'app_metadata'}:
+                # An unconsumed pre-3.7.1 undo predates periodic metadata; preserve its existing keys.
+                snapshot['app_metadata'] = [dict(row) for row in self.connection.execute('SELECT * FROM app_metadata ORDER BY rowid')]
             if set(snapshot) != set(tables):
                 raise ValueError("Undo belongs to a different schema and cannot be applied.")
             for table in (['financial_accounts_v3'] if 'financial_accounts_v3' in tables else []) + self.MUTABLE_DELETE_ORDER:

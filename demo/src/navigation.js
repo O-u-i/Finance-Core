@@ -9,7 +9,7 @@ export const views = {
   legacyreview: ['Journal activity review', {}],
   balances: ['Accounts & balances', {}],
   assets: ['Assets & liabilities', {}],
-  plans: ['Monthly plans', { plans: '/monthly-plans' }],
+  plans: ['Cash-flow plans', { plans: '/monthly-plans' }],
   livingreview: ['Monthly review', {}],
   livingdata: ['Import & export', {}],
   planning: ['Living & plans', { living: '/living-accounts', snapshots: '/living-snapshots', plans: '/monthly-plans', world: '/world' }],
@@ -22,6 +22,10 @@ export const segmentViews = {
   living: ['balances', 'assets', 'plans', 'livingreview', 'livingdata'],
 };
 export const configurationViews = ['overview', 'master', 'settings'];
+
+export function masterSections(legacy = false) {
+  return [['commodities','Commodities'],['accounts','Accounts'],['prices','Prices'], ...(!legacy ? [['opening','Opening balances'],['ownership','Ownership & agreements']] : [])];
+}
 
 export function latestCompletedMonth(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit' }).formatToParts(now);

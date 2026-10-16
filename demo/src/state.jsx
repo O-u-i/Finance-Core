@@ -106,9 +106,10 @@ export function useFinance() {
   const navigate = (view, tab = '', segment = routeRef.current.segment || 'investment', month = '') => {
     const next = { view, tab, segment, ...(month ? { month } : {}) };
     const hash = routeHash(next);
-    if (location.hash === hash) return;
-    if (!canLeave()) return;
+    if (location.hash === hash) return true;
+    if (!canLeave()) return false;
     history.pushState(null, '', hash); transition(next);
+    return true;
   };
   const switchWorkspace = (wid) => {
     if (!canLeave()) return;

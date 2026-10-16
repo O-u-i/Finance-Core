@@ -7,9 +7,9 @@ const sections = Object.entries(packages).map(([name, version]) => {
   if (pkg.version !== version || pkg.license !== 'MIT') throw new Error(`Unreviewed dependency: ${name}`);
   return `${name} ${version}\n${readFileSync(`node_modules/${name}/LICENSE`, 'utf8').trim()}\n`;
 });
-const sidebar = 'React Bits LineSidebar · source revision 1eeb6f105c68b964289d85dabbe84a1d551f3797\n'
-  + 'https://github.com/DavidHDev/react-bits/tree/1eeb6f105c68b964289d85dabbe84a1d551f3797\n'
-  + 'Adapted for controlled FC navigation, keyboard buttons, reduced motion and desktop layout.\n'
+const sidebar = 'React Bits BranchedMenu · source revision d9085a5d6cb62a1c7512d8fa05a4f966736b575c\n'
+  + 'https://github.com/DavidHDev/react-bits/tree/d9085a5d6cb62a1c7512d8fa05a4f966736b575c\n'
+  + 'Adapted for controlled FC page/section navigation, keyboard buttons, reduced motion and desktop layout. No Hugeicons dependency.\n'
   + readFileSync('public/REACT-BITS-LICENSE.txt', 'utf8').trim() + '\n';
 if (!sidebar.includes('MIT + Commons Clause') || !sidebar.includes('Copyright (c) 2026 David Haz')) throw new Error('Reviewed sidebar license missing.');
 const notice = `Finance Core frontend third-party notices\n\n${[...sections, sidebar].join('\n---\n\n')}`;

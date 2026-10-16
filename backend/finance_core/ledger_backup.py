@@ -16,6 +16,8 @@ def create_backup(connection: sqlite3.Connection, *, format_version: int = 2) ->
             raise ValueError('Full Vault backup requires schema 3.')
         tables = FINANCE_TABLES
     elif format_version == 2:
+        if connection.execute("SELECT 1 FROM app_metadata WHERE key LIKE 'plan-repeat-months:%' LIMIT 1").fetchone():
+            raise ValueError('Periodic plans require a full Vault backup (format 3); legacy format 2 would lose their schedules.')
         tables = V2_TABLES
     else:
         raise ValueError('Unsupported backup format.')

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "Finance Core 3.2 architecture",
+    "title": "Finance Core 3.7.1 architecture",
     "locale": "en",
     "quality_profile": "showcase",
     "viewBox": [
@@ -14,7 +14,7 @@
     {
       "id": "standalone_ui",
       "type": "frontend",
-      "label": "Standalone FC UI",
+      "label": "Desktop workbench",
       "pos": [
         60,
         245
@@ -23,13 +23,13 @@
         180,
         72
       ],
-      "sublabel": "React 19.3 / Vite"
+      "sublabel": "Branched pages / sections"
     },
     {
       "id": "frag_plugin",
       "type": "external",
-      "label": "Optional FRAG plugin",
-      "sublabel": "read-only consumer",
+      "label": "Official reader 1.7.0",
+      "sublabel": "Optional / protocol 2",
       "pos": [
         60,
         475
@@ -42,8 +42,8 @@
     {
       "id": "api_v3",
       "type": "backend",
-      "label": "FC API",
-      "sublabel": "/api/v3",
+      "label": "Workspace HTTP API",
+      "sublabel": "/api/v3 / API 3.7.0",
       "pos": [
         330,
         245
@@ -82,8 +82,8 @@
     {
       "id": "domain",
       "type": "backend",
-      "label": "Deterministic domain",
-      "sublabel": "finance rules",
+      "label": "Deterministic finance",
+      "sublabel": "Balances / plan forecasts",
       "pos": [
         1140,
         90
@@ -105,7 +105,7 @@
         180,
         72
       ],
-      "sublabel": "SQLite adapter"
+      "sublabel": "Plan schedules / undo"
     },
     {
       "id": "registry",
@@ -187,26 +187,26 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "Independent FC",
+      "title": "Desktop fixes",
       "items": [
-        "React pages use the Workspace API client",
-        "Ledger routes call repository and domain rules"
+        "Fluid layout and controlled section navigation",
+        "English inputs, account cards and record charts"
       ]
     },
     {
       "dot": "violet",
-      "title": "Optional consumer",
+      "title": "Forecast boundary",
       "items": [
-        "The FRAG plugin reads selected records",
-        "Journal changes open FC's own UI"
+        "Monthly, quarterly, semi-annual or annual plans",
+        "Exact forecasts never create posted transactions"
       ]
     },
     {
       "dot": "emerald",
-      "title": "Data boundary",
+      "title": "Unchanged data ownership",
       "items": [
-        "Requests and lifecycle changes share a Vault lock",
-        "Each Vault owns a separate ledger SQLite"
+        "FC is the only Vault writer; schema stays 3",
+        "Reader 1.7.0 still pins API 3.7.0"
       ]
     }
   ]

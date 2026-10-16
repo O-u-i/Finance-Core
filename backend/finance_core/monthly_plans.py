@@ -15,6 +15,9 @@ def monthly_plan_report(plans: list[MonthlyPlanV2], month: str) -> dict:
     occurrences = []
     for plan in plans:
         start = date.fromisoformat(plan.start_date)
+        elapsed = (first.year - start.year) * 12 + first.month - start.month
+        if plan.recurring_monthly and (elapsed < 0 or elapsed % plan.repeat_every_months):
+            continue
         due = first.replace(day=min(plan.day_of_month, monthrange(first.year, first.month)[1])) if plan.recurring_monthly else start
         if due < start or due.isoformat()[:7] != month:
             continue

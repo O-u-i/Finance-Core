@@ -598,7 +598,10 @@ def create_v2_router(
 
     @router.get("/backup")
     def create_backup(request: Request) -> dict[str, Any]:
-        return {"data": repo(request).create_backup()}
+        try:
+            return {"data": repo(request).create_backup()}
+        except ValueError as error:
+            raise HTTPException(409, detail={'code': 'FULL_VAULT_BACKUP_REQUIRED', 'message': str(error)}) from error
 
     @router.post("/backup/restore", status_code=201)
     def restore_backup(request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:

@@ -33,6 +33,23 @@ test('ordinary panel explanations use help while irreversible notices remain vis
   assert.match(html, /<p class="notice">No ordinary undo\.<\/p>/);
 });
 
+test('branched navigation exposes page headings as controlled second-level destinations', async () => {
+  const { default: Sidebar } = await server.ssrLoadModule('/demo/src/BranchedMenu.jsx');
+  const html = render(Sidebar, { items:[{key:'journal',label:'Journal'},{key:'review',label:'Monthly review',children:[{key:'review-body',label:'Investment monthly review'},{key:'close',label:'Immutable month close'}]}], activeKey:'review',activeSection:'close' });
+  assert.match(html, /aria-expanded="true"/);
+  assert.match(html, /Investment monthly review/); assert.match(html, /Immutable month close/);
+  assert.match(html, /aria-current="location"/);
+  assert.match(html, /<svg/);
+});
+
+test('branched navigation retains multiple independently open groups instead of a route-only accordion', async () => {
+  const { default: Menu } = await server.ssrLoadModule('/demo/src/BranchedMenu.jsx');
+  const html = render(Menu, { items:[{key:'journal',label:'Journal',children:[{key:'drafts',label:'Unposted drafts'}]},
+    {key:'review',label:'Monthly review',children:[{key:'close',label:'Immutable month close'}]}], activeKey:'review',defaultOpen:['journal','review'] });
+  assert.equal((html.match(/aria-expanded="true"/g)||[]).length,2);
+  assert.doesNotMatch(html,/hidden=""/);
+});
+
 test('record tables expose sort direction and order decimal strings without losing precision', () => {
   const html = render(components.Table, { caption: 'Synthetic balances', columns: [['amount', 'Amount']],
     rows: [{ amount: '9007199254740993.12' }, { amount: '-2' }, { amount: '0.09' }, { amount: '0.1' }] });
@@ -78,9 +95,25 @@ test('Monthly plans expose category, edit, delete, due-date wording and backend 
   assert.match(html, />Category</);
   assert.match(html, />Edit</);
   assert.match(html, />Delete</);
-  assert.match(html, /Day of month.*1–31/);
+  assert.match(html, /Due day.*1–31/);
   assert.match(html, /Scheduled category totals/);
   assert.match(html, /CF inflow/);
+});
+
+test('cash-flow plans offer monthly, quarterly, semi-annual, annual and one-time schedules with contextual help', async () => {
+  const { default: Plans } = await server.ssrLoadModule('/demo/src/pages/MonthlyPlans.jsx');
+  const html = render(Plans, { fc: { route: { view: 'plans' }, data: { commodities: [{ code:'CNY',kind:'currency',status:'active' }], plans:[] } } });
+  for (const label of ['Monthly', 'Quarterly', 'Semi-annual', 'Annual', 'One time', 'Repeat interval', 'Due day']) assert.match(html, new RegExp(label));
+  assert.match(html, /start month/);
+  assert.doesNotMatch(html, />Frequency<|Monthly cash-flow plans/);
+});
+
+test('shared date, month and file controls have English application-owned affordances', () => {
+  for (const type of ['date', 'month', 'datetime-local', 'file']) {
+    const html = render(components.Field, { label: 'Synthetic '+type, children: React.createElement('input', { type, name: 'synthetic', required: true }) });
+    if (type === 'file') { assert.match(html, /Choose file/); assert.match(html, /No file selected/); }
+    else { assert.match(html, /type="text"/); assert.match(html, /YYYY-MM/); }
+  }
 });
 
 test('Asset rows prioritize server valuation and status; Note and forms are secondary dialog content', async () => {
@@ -118,6 +151,18 @@ test('Overview presents both segments without empty charts or combining financia
   assert.match(html,/Synthetic posted record/); assert.match(html,/Synthetic Living record/);
   assert.match(html,/Investment · Journal/); assert.match(html,/Living · L001/);
   assert.match(html,/0.13/); assert.doesNotMatch(html,/<canvas|chart-placeholder/);
+  assert.match(html,/Record mix/); assert.match(html,/Record states/);
+  assert.match(html,/Record counts, not financial totals/);
+});
+
+test('review account cards retain exact balances, unknown states and independent currencies', async () => {
+  const { RecordedBalanceReadout } = await server.ssrLoadModule('/demo/src/pages/RecordedBalances.jsx');
+  const html = render(RecordedBalanceReadout, { report:{month:'2026-09',accounts:[
+    {accountId:'one',code:'L1',name:'Synthetic one',currency:'CNY',amount:'9007199254740993.12',status:'confirmed'},
+    {accountId:'two',code:'L2',name:'Synthetic two',currency:'USD',amount:null,status:'unknown'},
+  ]} });
+  assert.match(html,/summary-card-grid/); assert.match(html,/9007199254740993.12/);
+  assert.match(html,/USD/); assert.match(html,/Unknown/); assert.doesNotMatch(html,/<table/);
 });
 
 test('Batch creation and ownership agreements offer structured fields instead of required JSON input', async () => {

@@ -2,6 +2,7 @@ import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'reac
 import { createPortal } from 'react-dom';
 import { selectedMonth } from './navigation.js';
 import { orderedRecords, recordValue } from './records.js';
+import { DateInput, FileInput } from './EnglishInputs.jsx';
 export const options = values => values.map(value => ({ value, label: value }));
 
 export function Logo({ small = false, markOnly = false }) {
@@ -9,9 +10,9 @@ export function Logo({ small = false, markOnly = false }) {
 }
 export function Button({ children, primary, danger, ...props }) { return <button className={`${primary ? 'primary' : ''} ${danger ? 'danger' : ''}`} {...props}>{children}</button>; }
 export function MonthPicker({ fc, label = 'As-of month (balances are month-end observations)', value = selectedMonth(fc.route) }) {
-  return <Field label={label}><input type="month" value={value} disabled={fc.busy} onChange={event => {
+  return <Field key={`${value}/${fc.loading}`} label={label}><input type="month" value={value} disabled={fc.busy} onChange={event => {
     const month = event.target.value;
-    if (!month) return;
+    if (!/^[0-9]{4}-(0[1-9]|1[0-2])$/.test(month) || month.startsWith('0000')) return;
     const globalView = ['overview', 'master'].includes(fc.route.view);
     fc.navigate(fc.route.view, globalView ? fc.route.tab : month, fc.route.segment, globalView ? month : '');
   }}/></Field>;
@@ -47,12 +48,12 @@ export function Help({ children, label = 'Help' }) {
     if (rect.top < 11 || rect.bottom > innerHeight - 11) setPosition({ width: position.width, left: position.left, top: Math.max(12, innerHeight - rect.height - 12) });
   }, [position]);
   const show = event => {
-    if (event.pointerType !== 'mouse') return;
+    if (event.type !== 'focus' && event.pointerType !== 'mouse') return;
     const rect = trigger.current.getBoundingClientRect(), width = Math.min(320, innerWidth - 24);
     setPosition({ width, left: Math.max(12, Math.min(rect.left, innerWidth - width - 12)),
       ...(rect.bottom + 150 > innerHeight ? { bottom: innerHeight - rect.top + 8 } : { top: rect.bottom + 8 }) });
   };
-  return <span ref={trigger} className="help-trigger" role="img" aria-label={`${label}: ${children}`} aria-describedby={position ? tooltip : undefined} onPointerEnter={show} onPointerLeave={() => setPosition(null)}>
+  return <span ref={trigger} className="help-trigger" role="img" tabIndex={0} aria-label={`${label}: ${children}`} aria-describedby={position ? tooltip : undefined} onFocus={show} onBlur={() => setPosition(null)} onKeyDown={event => { if (event.key === 'Escape') setPosition(null); }} onPointerEnter={show} onPointerLeave={() => setPosition(null)}>
     <span aria-hidden="true">?</span>{position && createPortal(<span ref={bubble} id={tooltip} className="help-tooltip" role="tooltip" style={position}>{children}</span>, trigger.current?.closest('dialog[open]') || document.body)}
   </span>;
 }
@@ -67,15 +68,21 @@ export function RecordRow({ title, meta, amount, currency, status, actions, clas
   </article>;
 }
 export function Panel({ title, description, notice, action, children, className = '' }) {
-  return <section className={`panel ${className}`}><div className="panel-heading"><div className="panel-title"><h2>{title}</h2>{description && <Help label={typeof title === 'string' ? title : 'Help'}>{description}</Help>}</div>{action}</div>{notice && <p className="notice">{notice}</p>}{children}</section>;
+  const section = useId();
+  return <section id={`section-${section}`} data-section-title={typeof title === 'string' ? title : undefined} className={`panel ${className}`}><div className="panel-heading"><div className="panel-title"><h2 tabIndex={-1}>{title}</h2>{description && <Help label={typeof title === 'string' ? title : 'Help'}>{description}</Help>}</div>{action}</div>{notice && <p className="notice">{notice}</p>}{children}</section>;
 }
-export function Field({ label, children, ...props }) {
+export function Field({ label, help, children, ...props }) {
   const id = useId();
   if (children?.type === 'select') {
     const options = React.Children.toArray(children.props.children).flat().filter(React.isValidElement).map((option) => ({ value: String(option.props.value ?? option.props.children), label: option.props.children }));
     return <Select label={label} {...children.props} options={options} onChange={children.props.onChange ? (value) => children.props.onChange({ target: { value } }) : undefined}/>;
   }
-  return <div className="field"><label htmlFor={id}>{label}</label>{children ? React.cloneElement(children, { id }) : <input id={id} {...props}/>}</div>;
+  let control = children ? React.cloneElement(children, { id }) : <input id={id} {...props}/>;
+  if (children?.type === 'input') {
+    if (['date','month','datetime-local'].includes(children.props.type)) control = <DateInput {...children.props} id={id} label={label}/>;
+    if (children.props.type === 'file') control = <FileInput {...children.props} id={id}/>;
+  }
+  return <div className="field"><label htmlFor={id}>{label}{help && <> <Help label={label}>{help}</Help></>}</label>{control}</div>;
 }
 export function Empty({ children = 'No records yet.' }) { return <div className="empty"><span className="empty-mark" aria-hidden="true">—</span><p>{children}</p></div>; }
 export function ResourceForm({ fc, fields, initial = {}, immutable = [], submitLabel = 'Save', onSave }) {
@@ -110,27 +117,37 @@ export function Table({ columns, rows = [], rowKey, caption = 'Records', control
 export function Tabs({ items, value, onChange }) {
   return <nav className="subnav" aria-label="Page sections">{items.map(([key, label]) => <button key={key} aria-current={value === key ? 'page' : undefined} className={value === key ? 'selected' : ''} onClick={() => onChange(key)}>{label}</button>)}</nav>;
 }
+
+export function SummaryCards({ rows = [], columns, label = 'Account summaries' }) {
+  const [query,setQuery] = useState(''), [sort,setSort] = useState(columns[0][0]), [descending,setDescending] = useState(false);
+  const visible = orderedRecords(rows, columns, sort, descending, query);
+  const display = (row, [key,,render]) => render ? render(row) : String(row[key] ?? 'Unknown');
+  return <div className="account-summaries">
+    {!!rows.length && <ListControls label={label} columns={columns.filter(([key]) => !['details','actions'].includes(key))} sort={sort} setSort={setSort} descending={descending} setDescending={setDescending} query={query} setQuery={setQuery}/>}
+    <div className="summary-card-grid" role="list" aria-label={label}>{visible.map((row,index) => <article className="summary-card" role="listitem" key={row.accountId || row.id || index}>
+      <h3>{display(row, columns[0])}</h3><dl>{columns.slice(1).map(column => <div key={column[0]}><dt>{column[1]}</dt><dd>{display(row,column)}</dd></div>)}</dl>
+    </article>)}</div>{!visible.length && <Empty>{rows.length ? 'No accounts match these filters.' : 'No records yet.'}</Empty>}
+  </div>;
+}
 export function Steps({ labels, current }) {
   return <ol className="stepper" aria-label="Progress">{labels.map((label, index) => <li key={label} className={`${index <= current ? 'reached' : ''} ${index === current ? 'current' : ''}`} aria-current={index === current ? 'step' : undefined}><span className="step-number">{index < current ? '✓' : index + 1}</span><span className="step-label">{label}</span>{index < labels.length - 1 && <span className="step-connector" aria-hidden="true"><i/></span>}</li>)}</ol>;
 }
 
 export function StepContent({ step, children, className = '' }) {
-  const outer = useRef(null), inner = useRef(null), previous = useRef(step);
+  const inner = useRef(null), previous = useRef(step);
   useLayoutEffect(() => {
     const node = inner.current;
-    const measure = () => { if (outer.current && node) outer.current.style.height = `${node.getBoundingClientRect().height}px`; };
-    measure(); const observer = new ResizeObserver(measure); observer.observe(node);
     let animation;
     if (previous.current !== step) {
       node.focus({ preventScroll: true }); previous.current = step;
-      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) animation = node.animate([{ opacity: .85, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 220, easing: 'cubic-bezier(.22,1,.36,1)' });
+      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) animation = node.animate([{ opacity: .85 }, { opacity: 1 }], { duration: 120 });
     }
-    return () => { observer.disconnect(); animation?.cancel(); };
+    return () => animation?.cancel();
   }, [step]);
-  return <div className={`step-content ${className}`} ref={outer}><div className="step-page" ref={inner} key={step} tabIndex={-1}>{children}</div></div>;
+  return <div className={`step-content ${className}`}><div className="step-page" ref={inner} key={step} tabIndex={-1}>{children}</div></div>;
 }
 
-export function Select({ label, value, defaultValue, onChange, options = [], disabled = false, name, required, showTags = true }) {
+export function Select({ label, help, value, defaultValue, onChange, options = [], disabled = false, name, required, showTags = true }) {
   const id = useId(), root = useRef(null), list = useRef(null), trigger = useRef(null), native = useRef(null);
   const [localValue, setLocalValue] = useState(defaultValue ?? options[0]?.value ?? '');
   const actual = value ?? localValue;
@@ -189,7 +206,7 @@ export function Select({ label, value, defaultValue, onChange, options = [], dis
     else if (event.key === 'Enter' || event.key === ' ') choose(index);
   };
   return <div className="field select-field" ref={root}>
-    <label id={`${id}-label`} htmlFor={`${id}-native`}>{label}</label>
+    <label id={`${id}-label`} htmlFor={`${id}-native`}>{label}{help && <> <Help label={label}>{help}</Help></>}</label>
     <select ref={native} className="select-native" id={`${id}-native`} name={name} required={required} value={actual} disabled={disabled} onChange={(e) => { setLocalValue(e.target.value); onChange?.(e.target.value, options.find((option) => option.value === e.target.value)); }}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
     <div className="select-custom"><button type="button" ref={trigger} aria-labelledby={`${id}-label ${id}-value`} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? `${id}-list` : undefined} disabled={disabled || !options.length} onClick={() => { setIndex(Math.max(0, selected)); setOpen(!open); }} onKeyDown={(event) => { if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); setIndex(Math.max(0, selected)); setOpen(true); } }}><span id={`${id}-value`}>{options[selected]?.label || 'Select an option'}</span><svg className={open ? 'select-chevron open' : 'select-chevron'} viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6"/></svg></button>
     {open && position && createPortal(<ul ref={list} id={`${id}-list`} style={position} className="select-menu glide-menu" role="listbox" tabIndex={0} aria-labelledby={`${id}-label`} aria-activedescendant={`${id}-${index}`} onKeyDown={keyDown} onBlur={(event) => { if (!root.current?.contains(event.relatedTarget) && !list.current?.contains(event.relatedTarget)) setOpen(false); }}><li className="select-highlight" aria-hidden="true" role="presentation" style={highlight || { opacity: 0 }}/>{options.map((option, i) => <li data-index={i} id={`${id}-${i}`} key={option.value} role="option" aria-selected={actual === option.value} onPointerMove={() => setIndex(i)} onClick={() => choose(i)}><span>{option.label}</span><span className="option-meta">{showTags && option.tag && <small>{option.tag}</small>}{actual === option.value && <span aria-hidden="true">✓</span>}</span></li>)}</ul>, root.current?.closest('dialog[open]') || document.body)}

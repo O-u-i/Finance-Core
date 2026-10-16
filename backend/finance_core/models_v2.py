@@ -282,9 +282,19 @@ class MonthlyPlanV2(V2Model):
     commodity_code: str = Field(alias="commodityCode")
     category: str
     recurring_monthly: bool = Field(default=True, alias="recurringMonthly")
+    repeat_every_months: Literal[1, 3, 6, 12] = Field(default=1, alias="repeatEveryMonths")
     day_of_month: int = Field(alias="dayOfMonth", ge=1, le=31)
     start_date: str = Field(alias="startDate")
     note: str = ""
+
+    @model_validator(mode="after")
+    def validate_schedule(self):
+        from datetime import date
+        if date.fromisoformat(self.start_date).isoformat() != self.start_date:
+            raise ValueError("Start date must use YYYY-MM-DD.")
+        if not self.recurring_monthly and self.repeat_every_months != 1:
+            raise ValueError("A one-time plan cannot have a repeating interval.")
+        return self
 
     @field_validator("commodity_code")
     @classmethod

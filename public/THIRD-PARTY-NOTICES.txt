@@ -75,9 +75,9 @@ SOFTWARE.
 
 ---
 
-React Bits LineSidebar · source revision 1eeb6f105c68b964289d85dabbe84a1d551f3797
-https://github.com/DavidHDev/react-bits/tree/1eeb6f105c68b964289d85dabbe84a1d551f3797
-Adapted for controlled FC navigation, keyboard buttons, reduced motion and desktop layout.
+React Bits BranchedMenu · source revision d9085a5d6cb62a1c7512d8fa05a4f966736b575c
+https://github.com/DavidHDev/react-bits/tree/d9085a5d6cb62a1c7512d8fa05a4f966736b575c
+Adapted for controlled FC page/section navigation, keyboard buttons, reduced motion and desktop layout. No Hugeicons dependency.
 MIT + Commons Clause License Condition v1.0
 
 Copyright (c) 2026 David Haz
