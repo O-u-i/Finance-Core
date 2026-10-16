@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { id } from '../api.js';
 import { selectedMonth } from '../navigation.js';
-import { Button, Field, MonthPicker, Panel, ResourceForm, Table, Tabs } from '../components.jsx';
+import { Button, Dialog, Field, ListControls, MonthPicker, Panel, ResourceForm, Table, Tabs } from '../components.jsx';
+import { orderedRecords } from '../records.js';
+import ReportChecks from '../ReportChecks.jsx';
 
 const priorMonth = (month) => {
   const [year, number] = month.split('-').map(Number);
@@ -13,14 +15,7 @@ const currentObservation = (fc, kind, subject, month) => {
   return observations.find(item => !item.observedDate && item.kind === kind && item.subjectId === subject && item.month === month && !replaced.has(item.id));
 };
 
-function Coverage({ report }) {
-  if (!report) return <p>Financial report is not available.</p>;
-  return <div className={`notice ${report.coverage.complete ? 'success' : ''}`} role="status">
-    <p><strong>{report.coverage.complete ? 'Recorded inputs reconciled' : 'Incomplete financial inputs'}</strong> · {report.asOf} · currencies remain separate. External completeness is unknown.</p>
-    {report.coverage.needsReview && <p>A confirmed close or its preceding inputs changed. Review and append a correction.</p>}
-    {!!report.issues.length && <ul>{report.issues.map((issue, index) => <li key={`${issue.code}-${index}`}>{issue.code} · {issue.subjectId}: {issue.message}</li>)}</ul>}
-  </div>;
-}
+function Coverage({ report, fc }) { return <ReportChecks report={report} accounts={fc?.data.financialAccounts} parties={fc?.data.parties} assets={fc?.data.assets}/>; }
 
 export function PersonalOverview({ fc }) {
   const [perspective, setPerspective] = useState(['investment','living'].includes(fc.route.tab) ? fc.route.tab : 'consolidated');
@@ -39,32 +34,73 @@ export function PersonalOverview({ fc }) {
   const columns = perspective === 'investment' ? [['currency','Currency'],['investmentAssets','Pool assets (market)'],['investmentLiabilities','Pool liabilities'],['residualEquity','Residual equity'],['ownerInvestmentValue','Your economic stake']]
     : perspective === 'living' ? [['currency','Currency'],['livingAssets','Financial assets'],['livingLiabilities','Personal liabilities'],['nonFinancialAssets','Manual asset values'],['openingCash','Opening cash'],['closingCash','Closing cash']]
       : [['currency','Currency'],['knownPersonalSubtotal','Known-input subtotal (may be partial)'],['personalNetWorth','Reconciled personal net worth'],['ownerInvestmentValue','Investment economic stake'],['livingLiabilities','Personal liabilities']];
-  return <><Panel className="financial-overview" title="Financial overview" description="Read-only month-end dashboard. Pool assets are not personal wealth; currencies and third-party interests remain separate."><Tabs items={[[ 'consolidated','Consolidated'],['investment','Investment'],['living','Living']]} value={perspective} onChange={setPerspective}/><Coverage report={report}/><Table caption={`${perspective} financial overview`} rows={rows} columns={columns}/></Panel>
+  return <><Panel className="financial-overview" title="Financial overview" description="Read-only month-end dashboard. Pool assets are not personal wealth; currencies and third-party interests remain separate."><Tabs items={[[ 'consolidated','Consolidated'],['investment','Investment'],['living','Living']]} value={perspective} onChange={setPerspective}/><Coverage report={report} fc={fc}/><Table caption={`${perspective} financial overview`} rows={rows} columns={columns}/></Panel>
     {currencies.filter(item => item.ownerships.length).map(item => <Panel className="financial-overview" key={item.currency} title={`${item.currency} · beneficial ownership`}><Table rows={item.ownerships} columns={[[ 'partyId','Beneficiary', value => fc.data.parties?.find(party => party.id === value.partyId)?.name || 'Unknown beneficiary'],['claims','Accrued claims'],['residualShare','Residual share'],['residualValue','Residual value (may be negative)'],['economicValue','Economic value']]}/></Panel>)}
   </>;
 }
 
-function ObservationForm({ fc, kind, subject, currency, label }) {
-  const month = selectedMonth(fc.route), current = currentObservation(fc, kind, subject, month);
-  const previous = currentObservation(fc, kind, subject, priorMonth(month));
+function ValuationForm({ fc, asset, month, current, save }) {
+  const previous = currentObservation(fc, 'valuation', asset.id, priorMonth(month));
   const [amount, setAmount] = useState(current?.amount ?? previous?.amount ?? '');
   const [confirmed, setConfirmed] = useState(false), [source, setSource] = useState(current?.source || ''), [reason, setReason] = useState('');
   const [note, setNote] = useState(current?.note || '');
   return <form className="resource-form" onChangeCapture={event => fc.markDirty(event.currentTarget)} onSubmit={async event => {
     event.preventDefault(); const form = event.currentTarget;
-    const result = await fc.ledger('/monthly-observations', { method:'POST', body: { id:id(kind), subjectId:subject, month, kind, currency, amount, source, note, confirmed:true, ...(current ? { supersedes:current.id, reason } : {}) } }, 'Monthly observation appended; no Journal entry was created.');
+    const result = await save('/monthly-observations', { method:'POST', body: { id:id('valuation'), subjectId:asset.id, month, kind:'valuation', currency:asset.currency, amount, source, note, confirmed:true, ...(current ? { supersedes:current.id, reason } : {}) } }, `Valuation saved for ${month}. No Journal entry was created.`);
     if (result) { fc.clean(form); setConfirmed(false); }
-  }}><fieldset disabled={fc.busy || fc.readonly}><div className="form-grid"><Field label={`${label} · ${currency}`}><input inputMode="decimal" value={amount} required onChange={event => setAmount(event.target.value)}/></Field><Field label="Valuation / statement source"><input value={source} required onChange={event => setSource(event.target.value)}/></Field>{current && <Field label="Correction reason"><input value={reason} required onChange={event => setReason(event.target.value)}/></Field>}<Field label="Note"><textarea name="note" rows={2} maxLength={4000} value={note} onChange={event => { setNote(event.target.value); setConfirmed(false); }}/></Field></div>
-    <p>{current ? `Current observation is ${current.confirmed ? 'confirmed' : 'pending'}; saving appends a correction.` : previous ? 'Previous-month value is a suggestion, not a new observation.' : 'No opening or prior value is known. Enter the observed amount explicitly.'}</p>
-    <label><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)}/> I observed and confirm this value at {month} month end.</label><Button primary disabled={!confirmed}>Confirm {kind}</Button></fieldset></form>;
+  }}><fieldset disabled={fc.busy || fc.readonly}><div className="form-grid"><Field label={`Whole-asset value · ${asset.currency}`}><input name="amount" inputMode="decimal" value={amount} required onChange={event => { setAmount(event.target.value); setConfirmed(false); }}/></Field><Field label="Valuation source"><input name="source" value={source} maxLength={500} required onChange={event => { setSource(event.target.value); setConfirmed(false); }}/></Field>{current && <Field label="Correction reason"><input name="reason" value={reason} required onChange={event => { setReason(event.target.value); setConfirmed(false); }}/></Field>}<Field label="Note"><textarea name="note" rows={2} maxLength={4000} value={note} onChange={event => { setNote(event.target.value); setConfirmed(false); }}/></Field></div>
+    <p>{current ? 'Saving appends a correction and keeps the earlier valuation. Enter a correction reason.' : previous ? 'The previous month is only a suggestion. Confirm this month’s value independently.' : 'No value is recorded for this month. Enter a value and source, then confirm below.'}</p>
+    <div className="actions"><label className="balance-confirmation"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)}/> I confirm this value at {month} month end, not today’s value.</label><Button type="submit" primary disabled={!confirmed}>{fc.busy ? 'Saving…' : 'Save valuation'}</Button></div></fieldset></form>;
+}
+
+function AssetCard({ fc, asset, month }) {
+  const current = currentObservation(fc, 'valuation', asset.id, month);
+  const [feedback, setFeedback] = useState(null), [disposing, setDisposing] = useState(false);
+  const owner = fc.data.parties?.find(party => party.id === asset.ownerPartyId)?.name || 'Unknown beneficiary';
+  const disposalScope = `disposal:${asset.id}`;
+  const closeDisposal = () => { if (!fc.busy) { fc.clean(disposalScope); setDisposing(false); } };
+  const save = async (path, options, message) => {
+    setFeedback(null);
+    const result = await fc.run(async (api, workspaceId) => {
+      try { return await api.ledger(workspaceId, path, options); }
+      catch (error) { setFeedback({ error: true, text: error.message }); throw error; }
+    }, message);
+    if (result) setFeedback({ text: message });
+    return result;
+  };
+  return <Panel className="asset-card" title={asset.name} description={`${asset.assetType} · cost ${asset.purchaseCost} ${asset.currency} · ${owner} × ${asset.ownershipShare}`}>
+    {asset.note && <div className="saved-note"><h3>Note</h3><p className="note-text">{asset.note}</p></div>}
+    {asset.disposedMonth && <p className="notice">Disposal recorded: {asset.disposedMonth}. Excluded from later months; earlier records remain.</p>}
+    <h3>Saved valuation · {month}</h3>
+    {current ? <dl className="record-details"><dt>Whole-asset value</dt><dd>{current.amount} {asset.currency} · {current.confirmed ? 'Confirmed' : 'Pending'}</dd><dt>Source</dt><dd>{current.source}</dd>{current.note && <><dt>Note</dt><dd className="note-text">{current.note}</dd></>}</dl> : <p>No valuation saved for this month. Purchase cost is not an automatic valuation.</p>}
+    {(!asset.disposedMonth || month <= asset.disposedMonth) && <ValuationForm key={`${month}/${current?.id || ''}`} fc={fc} asset={asset} month={month} current={current} save={save}/>}
+    {feedback && <p className={`notice ${feedback.error ? 'error' : 'success'}`} role={feedback.error ? 'alert' : 'status'}>{feedback.text}</p>}
+    {!asset.disposedMonth && <Button type="button" disabled={fc.busy || fc.readonly} onClick={() => setDisposing(true)}>Record disposal</Button>}
+    {disposing && <Dialog title={`Record disposal · ${asset.name}`} onClose={closeDisposal} dismissible={!fc.busy}>
+      <p>This records the last month included in the asset register, not a deletion or a cash receipt. Its valuation for that month is still needed; later months exclude it.</p>
+      <form onChangeCapture={() => fc.markDirty(disposalScope)} onSubmit={async event => {
+        event.preventDefault(); const form = event.currentTarget, disposedMonth = new FormData(form).get('disposedMonth');
+        const result = await save(`/non-financial-assets/${encodeURIComponent(asset.id)}`, { method: 'PUT', body: { ...asset, disposedMonth } }, `Disposal recorded for ${disposedMonth}. Earlier valuations and Note are retained.`);
+        if (result) { fc.clean(disposalScope); setDisposing(false); }
+      }}><fieldset disabled={fc.busy || fc.readonly}><Field label="Last included month"><input name="disposedMonth" type="month" min={asset.purchasedDate.slice(0, 7)} defaultValue={month} required/></Field>
+        <div className="actions"><Button type="submit" primary>Save disposal</Button><Button type="button" onClick={closeDisposal}>Cancel</Button></div>
+      </fieldset></form>{feedback?.error && <p className="notice error" role="alert">{feedback.text}</p>}
+    </Dialog>}
+  </Panel>;
 }
 
 export function AssetsLiabilities({ fc }) {
+  const month = selectedMonth(fc.route), monthEnd = new Date(`${month}-01T00:00:00Z`);
+  monthEnd.setUTCMonth(monthEnd.getUTCMonth() + 1, 0);
+  const [query, setQuery] = useState(''), [sort, setSort] = useState('name'), [descending, setDescending] = useState(false);
   const partyOptions = (fc.data.parties || []).map(item => ({ value:item.id,label:item.name }));
-  const currencyOptions = (fc.data.commodities || []).filter(item => item.kind === 'currency').map(item => ({ value:item.code,label:item.code }));
-  return <><Panel title="Non-financial asset registry" description="Identity and acquisition cost are separate from manually confirmed market value. No depreciation or live valuation is inferred."><MonthPicker fc={fc}/><ResourceForm fc={fc} initial={{ ownershipShare:'1' }} fields={[[ 'name','Asset name'],['assetType','Asset type'],['currency','Currency','text',currencyOptions],['purchasedDate','Purchase date','date'],['purchaseCost','Purchase cost'],['ownerPartyId','Beneficiary','text',partyOptions],['ownershipShare','Ownership share (0–1)'],['linkedAccountId','Linked Living asset account (optional)'],['valuationMethod','Valuation basis','text',[{value:'manual_market_value',label:'Manual market value'},{value:'cost',label:'Manually confirmed cost'}]],['note','Note','textarea']]} submitLabel="Register asset" onSave={values => fc.ledger('/non-financial-assets',{method:'POST',body:{...values,id:id('asset'),linkedAccountId:values.linkedAccountId || null}},'Asset registered; enter its month-end valuation separately.')}/></Panel>
-    {(fc.data.assets || []).map(item => <Panel key={item.id} title={item.name} description={`${item.assetType} · cost ${item.purchaseCost} ${item.currency} · owner ${item.ownerPartyId} × ${item.ownershipShare}`}><ObservationForm key={`${item.id}/${selectedMonth(fc.route)}/${currentObservation(fc,'valuation',item.id,selectedMonth(fc.route))?.id || ''}`} fc={fc} kind="valuation" subject={item.id} currency={item.currency} label="Whole-asset manual value"/>{!item.disposedMonth && <Button disabled={fc.busy || fc.readonly} onClick={() => { if (confirm(`Record disposal after ${selectedMonth(fc.route)}? The current month's value must still be confirmed.`)) fc.ledger(`/non-financial-assets/${encodeURIComponent(item.id)}`,{method:'PUT',body:{...item,disposedMonth:selectedMonth(fc.route)}},'Disposal month recorded.'); }}>Record disposal month</Button>}</Panel>)}
-    <Panel title="Personal liabilities" description="Liabilities use actual-date balance records, not a second transaction system."><Table rows={(fc.data.financialAccounts || []).filter(item => item.segment === 'living' && item.type === 'liability')} columns={[[ 'name','Liability'],['ownerPartyId','Debtor'],['allowedCommodityCodes','Currency']]}/><Button onClick={() => fc.navigate('balances','','living')}>Record liability balances</Button></Panel></>;
+  const currencyOptions = (fc.data.commodities || []).filter(item => item.kind === 'currency' && item.status === 'active').map(item => ({ value:item.code,label:item.code }));
+  const linkedOptions = [{ value: '', label: 'No linked account' }, ...(fc.data.financialAccounts || []).filter(item => item.segment === 'living' && item.type === 'asset' && item.status === 'active').map(item => ({ value: item.id, label: `${item.code} · ${item.name}` }))];
+  const columns = [['name', 'Asset name'], ['assetType', 'Asset type'], ['currency', 'Currency'], ['purchasedDate', 'Purchase date'], ['purchaseCost', 'Purchase cost']];
+  return <><Panel title="Non-financial asset registry" description="Register what you own and its purchase cost. Registration is independent of the valuation month; no depreciation or live market value is inferred."><ResourceForm fc={fc} initial={{ ownershipShare:'1' }} fields={[[ 'name','Asset name'],['assetType','Asset type'],['currency','Currency','text',currencyOptions],['purchasedDate','Purchase date','date'],['purchaseCost','Purchase cost'],['ownerPartyId','Beneficiary','text',partyOptions],['ownershipShare','Ownership share (0–1)'],['linkedAccountId','Linked Living asset account (optional)','text',linkedOptions],['valuationMethod','Valuation basis','text',[{value:'manual_market_value',label:'Manual market value'},{value:'cost',label:'Manually confirmed cost'}]],['note','Note','textarea']]} submitLabel="Register asset" onSave={values => fc.ledger('/non-financial-assets',{method:'POST',body:{...values,id:id('asset'),linkedAccountId:values.linkedAccountId || null}},'Asset registered. Its Note is shown on the saved asset card; add a valuation separately.')}/></Panel>
+    <Panel className="asset-valuations" title="Asset valuations" description="Choose the month whose closing value you can confirm. This does not change purchase dates or actual-date bank balances."><MonthPicker fc={fc} label="Valuation month (value at month end)"/><p>Values below refer to {monthEnd.toISOString().slice(0, 10)}, not today. If you do not know that value, leave it unrecorded; unknown is not zero.</p><ListControls label="Assets" columns={columns} sort={sort} setSort={setSort} descending={descending} setDescending={setDescending} query={query} setQuery={setQuery}/></Panel>
+    {orderedRecords(fc.data.assets || [], columns, sort, descending, query).map(item => <AssetCard key={item.id} fc={fc} asset={item} month={month}/>)}
+    <Panel title="Personal liabilities" description="Liabilities use actual-date balance records, not a second transaction system."><Table rows={(fc.data.financialAccounts || []).filter(item => item.segment === 'living' && item.type === 'liability')} columns={[[ 'name','Liability'],['ownerPartyId','Debtor', item => fc.data.parties?.find(party => party.id === item.ownerPartyId)?.name || 'Unknown beneficiary'],['allowedCommodityCodes','Currency']]}/><Button onClick={() => fc.navigate('balances','','living')}>Record liability balances</Button></Panel></>;
 }
 
 function TransferTotals({ fc, month }) {
@@ -85,7 +121,7 @@ export function PersonalMonthlyReview({ fc, month = selectedMonth(fc.route) }) {
   const report = fc.data.personalReport;
   const rows = (report?.currencies || []).map(item => ({currency:item.currency,...item.totals}));
   const latest = (fc.data.closes || []).filter(item => item.month === month).at(-1);
-  return <><Panel title={fc.route.segment === 'investment' ? 'Investment monthly review' : 'Legacy Living month-end review'} description="Balance movement is not income, consumption or savings. Unexplained change remains explicitly unexplained."><MonthPicker fc={fc} value={month}/><Coverage report={report}/><Table rows={rows} columns={fc.route.segment === 'investment' ? [[ 'currency','Currency'],['investmentIncome','Ledger income'],['investmentExpenses','Ledger expenses'],['residualEquity','Month-end residual equity'],['ownerInvestmentValue','Owner economic stake']] : [[ 'currency','Currency'],['openingCash','Opening cash'],['closingCash','Closing cash'],['ledgerTransferIncoming','Tagged incoming'],['ledgerTransferOutgoing','Tagged outgoing'],['transferIncomingDifference','Incoming difference'],['transferOutgoingDifference','Outgoing difference'],['unexplainedCashChange','Unexplained cash change']]}/>{fc.route.segment === 'investment' && <Button onClick={() => fc.navigate('legacyreview',month,'investment')}>Read three-month activity report</Button>}</Panel>
+  return <><Panel title={fc.route.segment === 'investment' ? 'Investment monthly review' : 'Legacy Living month-end review'} description="Balance movement is not income, consumption or savings. Unexplained change remains explicitly unexplained."><MonthPicker fc={fc} value={month}/><Coverage report={report} fc={fc}/><Table rows={rows} columns={fc.route.segment === 'investment' ? [[ 'currency','Currency'],['investmentIncome','Ledger income'],['investmentExpenses','Ledger expenses'],['residualEquity','Month-end residual equity'],['ownerInvestmentValue','Owner economic stake']] : [[ 'currency','Currency'],['openingCash','Opening cash'],['closingCash','Closing cash'],['ledgerTransferIncoming','Tagged incoming'],['ledgerTransferOutgoing','Tagged outgoing'],['transferIncomingDifference','Incoming difference'],['transferOutgoingDifference','Outgoing difference'],['unexplainedCashChange','Unexplained cash change']]}/>{fc.route.segment === 'investment' && <Button onClick={() => fc.navigate('legacyreview',month,'investment')}>Read three-month activity report</Button>}</Panel>
     {fc.route.segment !== 'investment' && <TransferTotals fc={fc} month={month}/>}
     <Panel title="Immutable month close" description="Confirmation rechecks the exact input revision atomically. Corrections retain the original result and require a reason."><form onChangeCapture={event => fc.markDirty(event.currentTarget)} onSubmit={async event => {
       event.preventDefault(); const form = event.currentTarget;

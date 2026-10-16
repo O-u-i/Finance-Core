@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { id } from '../api.js';
 import { selectedRecordedMonth, shanghaiDate } from '../navigation.js';
-import { Button, Empty, Field, MonthPicker, Panel, Select, Table } from '../components.jsx';
+import { Button, Dialog, Empty, Field, MonthPicker, Panel, Select, Table } from '../components.jsx';
 import SnapshotHistory from '../SnapshotHistory.jsx';
 import { PersonalMonthlyReview, PersonalOverview } from './PersonalFinance.jsx';
 
@@ -52,6 +52,7 @@ export function RecordedBalances({ fc }) {
 
 export function RecordedBalanceReadout({ report, parties = [], filterable = false }) {
   const [accountFilter, setAccountFilter] = useState('');
+  const [details, setDetails] = useState(null);
   if (!report) return <Empty>Dated balance review is not available.</Empty>;
   const rows = report.accounts.filter(item => !accountFilter || item.accountId === accountFilter);
   return <>
@@ -60,14 +61,20 @@ export function RecordedBalanceReadout({ report, parties = [], filterable = fals
       { value: '', label: 'All accounts' }, ...report.accounts.map(item => ({ value: item.accountId, label: `${item.code} · ${item.name}` })),
     ]}/></div>}
     <Table caption="Dated monthly balance review" rows={rows} rowKey="accountId" columns={[
-      ['name', 'Account', item => <><strong>{item.code} · {item.name}</strong><small>{item.type} · {parties.find(party => party.id === item.ownerPartyId)?.name || 'Unknown beneficiary'}</small></>],
+      ['code', 'Account', item => <><strong>{item.code} · {item.name}</strong><small>{item.type} · {parties.find(party => party.id === item.ownerPartyId)?.name || 'Unknown beneficiary'}</small></>, item => `${item.code} ${item.name}`],
       ['currency', 'Currency'], ['observedDate', 'Latest record date', item => item.observedDate || 'Unknown'],
       ['amount', 'Recorded balance', item => item.amount ?? 'Unknown'],
-      ['previousDate', 'Previous record date', item => item.previousDate || 'Unknown'],
-      ['previousAmount', 'Previous balance', item => item.previousAmount ?? 'Unknown'],
       ['change', 'Balance change only', item => item.change ?? 'Unknown'],
       ['status', 'Status', item => item.status === 'unknown' ? 'Unknown' : item.status === 'pending' ? 'Pending' : 'Confirmed'],
+      ['details', 'Details', item => <Button type="button" onClick={() => setDetails(item)}>Details</Button>],
     ]}/>
+    {details && <Dialog title={`${details.code} · balance comparison`} onClose={() => setDetails(null)}>
+      <dl className="record-details"><dt>Account</dt><dd>{details.name}</dd><dt>Currency</dt><dd>{details.currency}</dd>
+        <dt>Latest actual record date</dt><dd>{details.observedDate || 'Unknown'}</dd><dt>Recorded balance</dt><dd>{details.amount ?? 'Unknown'}</dd>
+        <dt>Previous record date</dt><dd>{details.previousDate || 'Unknown'}</dd><dt>Previous recorded balance</dt><dd>{details.previousAmount ?? 'Unknown'}</dd>
+        <dt>Balance change only</dt><dd>{details.change ?? 'Unknown'}</dd>
+      </dl><p>A confirmed balance means the observation was confirmed, not that a monthly close is complete. With no previous record, the change is unknown. A difference is never inferred to be income or spending.</p>
+    </Dialog>}
   </>;
 }
 

@@ -2,7 +2,7 @@ export const views = {
   overview: ['Overview', {}],
   journal: ['Journal', { drafts: '/journal-entry-drafts', entries: '/journal-entries', undo: '/undo/latest' }],
   taccounts: ['T-accounts', { tAccounts: '/t-accounts' }],
-  positions: ['Securities & positions', { holdings: '/holdings' }],
+  positions: ['Securities & positions', {}],
   cashflow: ['Cash flow', { cashFlow: '/cash-flow' }],
   statements: ['Statements', { statements: '/financial-statements' }],
   monthlyreview: ['Monthly review', {}],
@@ -51,7 +51,7 @@ export function viewPaths(view, tab = '', now = new Date(), segment = '', asOfMo
   const recordedMonth = selectedRecordedMonth({ tab, month: asOfMonth }, now);
   if (view === 'cashflow') return { activityCashFlow: `/reports/activity-cash-flow?month=${recordedMonth}` };
   const recorded = { balanceRecords: '/balance-records', recordedReport: `/reports/living-recorded-balances?month=${recordedMonth}` };
-  if (view === 'overview') return { ...personal, personalReport: `/reports/personal-balance-sheet?month=${month}`, recordedReport: recorded.recordedReport };
+  if (view === 'overview') return { ...personal, assets: '/non-financial-assets', personalReport: `/reports/personal-balance-sheet?month=${month}`, recordedReport: recorded.recordedReport };
   if (view === 'master') return { ...views.master[1], ...personal, living: '/living-accounts', ...(tab === 'ownership' ? {
     legacyMapping: '/legacy-living-mapping', arrangements: '/investment-arrangements', personalReport: `/reports/personal-balance-sheet?month=${month}`,
   } : {}), ...(tab === 'opening' ? { openingRecords: '/opening-balances', balanceRecords: '/balance-records' } : {}) };
@@ -63,7 +63,8 @@ export function viewPaths(view, tab = '', now = new Date(), segment = '', asOfMo
     if (view === 'livingreview') Object.assign(result, recorded);
     return result;
   }
-  if (view === 'plans') return { ...views[view][1], financialAccounts: '/financial-accounts' };
+  if (view === 'planning') return { ...views.planning[1], planReport: `/reports/monthly-plans?month=${recordedMonth}` };
+  if (view === 'plans') return { ...views[view][1], financialAccounts: '/financial-accounts', planReport: `/reports/monthly-plans?month=${recordedMonth}` };
   return views[view][1];
 }
 

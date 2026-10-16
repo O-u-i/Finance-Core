@@ -114,3 +114,16 @@ def test_account_delete_preserves_drafts_recurring_templates_and_posted_facts(tm
         assert api.delete('/api/v2/financial-accounts/cash-cny').status_code == 422
         assert api.get('/api/v2/vault-backup').json()['data']['sha256'] == before
         assert api.delete('/api/v2/financial-accounts/cash-usd').status_code == 200
+
+
+@pytest.mark.parametrize('change', [{'type': 'liability'}, {'allowedCommodityCodes': ['USD']}])
+def test_legacy_ledger_update_cannot_reclassify_a_used_unified_account(tmp_path, change):
+    with client(tmp_path) as api:
+        seed(api)
+        create_and_post(api, opening_draft())
+        account = next(item for item in data(api, '/accounts') if item['id'] == 'cash-cny')
+        before = api.get('/api/v2/vault-backup').json()['data']['sha256']
+        response = api.put('/api/v2/accounts/cash-cny', json={**account, **change})
+        assert response.status_code == 422
+        assert api.get('/api/v2/vault-backup').json()['data']['sha256'] == before
+        assert next(item for item in data(api, '/financial-accounts') if item['id'] == 'cash-cny')['type'] == 'asset'

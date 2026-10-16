@@ -2,14 +2,14 @@
   "id": "finance-core",
   "name": "Finance Core",
   "protocolVersion": 2,
-  "version": "1.5.0",
+  "version": "1.6.0",
   "minHostVersion": "1.12.1",
   "capabilities": [
     "evidence.read"
   ],
-  "fcApiVersion": "3.5.0",
+  "fcApiVersion": "3.6.0",
   "files": {
-    "adapter.py": "996d9c7f5ac375636368c57e6ddfce015b2c016f34b075b476507c7d91ec1a6b",
+    "adapter.py": "75e3d11be96070ac50720b31215bd6d46fae95f85acd2b5aa1fdd7360d49413e",
     "ui.js": "36bcf6d56e69014543a18a578b6fe8ba10f3cf4043e8cc7555af09655654c166"
   }
 }

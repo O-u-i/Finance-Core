@@ -8,7 +8,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Res
 from finance_core.api_v2 import repo, translate
 from finance_core.api_v3 import require_admin, workspace_context
 from finance_core.contracts_v3 import SESSION_SECURITY, STANDARD_ERROR_RESPONSES, LedgerResponse
-from finance_core.contracts_v3 import DraftRecord, JournalEntry, MonthlyActivityReview, OpeningCashFlow, OpeningRecords
+from finance_core.contracts_v3 import DraftRecord, JournalEntry, MonthlyActivityReview, OpeningCashFlow, OpeningRecords, MonthlyPlanReport
+from finance_core.monthly_plans import monthly_plan_report
 from finance_core.opening_balances import OpeningBalanceRequest, OpeningBalancePostRequest
 from finance_core.opening_balance_operations import OpeningBalanceOperations
 from finance_core.models_personal import (
@@ -50,6 +51,13 @@ def create_personal_router() -> APIRouter:
                        dependencies=[Depends(require_admin), Depends(workspace_context, scope='function')],
                        responses=STANDARD_ERROR_RESPONSES)
     extra = {'security': SESSION_SECURITY, 'x-fc-required-actor': 'owner-session'}
+
+    @router.get('/reports/monthly-plans', response_model=DataResponse[MonthlyPlanReport], openapi_extra=extra)
+    def planned_cash_flow(request: Request, month: str = Query(pattern=r'^\d{4}-(0[1-9]|1[0-2])$')):
+        try:
+            return {'data': monthly_plan_report(repo(request).list_monthly_plans(), month), 'workspaceId': request.state.workspace_id}
+        except Exception as error:
+            raise translate(error) from error
 
     @router.post('/opening-balance-drafts', response_model=DataResponse[DraftRecord], status_code=201, openapi_extra=extra)
     def opening_draft(item: OpeningBalanceRequest, request: Request):

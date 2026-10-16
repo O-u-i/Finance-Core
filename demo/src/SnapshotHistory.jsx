@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Button, Select, Table } from './components.jsx';
+import { Button, ListControls, Select, Table } from './components.jsx';
+import { orderedRecords } from './records.js';
 
 const pageSize = 10;
 const dateLabel = value => {
@@ -19,7 +20,7 @@ function Pager({ page, pages, onChange }) {
 function HistoryRows({ records, columns }) {
   const [requestedPage, setPage] = useState(0);
   const pages = Math.max(1, Math.ceil(records.length / pageSize)), page = Math.min(requestedPage, pages - 1);
-  return <><Table caption="Snapshot history" rows={records.slice(page * pageSize, (page + 1) * pageSize)} rowKey="id" columns={[
+  return <><Table controls={false} caption="Snapshot history" rows={records.slice(page * pageSize, (page + 1) * pageSize)} rowKey="id" columns={[
     ...columns,
     ['details', 'Details', item => <details className="snapshot-metadata"><summary>Details</summary><dl>
       <dt>Account ID</dt><dd>{item.subjectId || item.accountId}</dd>
@@ -34,6 +35,7 @@ function HistoryRows({ records, columns }) {
 
 export default function SnapshotHistory({ records = [], accounts = [], legacy = false, dated = false }) {
   const [filter, setFilter] = useState(''), [requestedPage, setPage] = useState(0);
+  const [sort, setSort] = useState('account'), [descending, setDescending] = useState(false), [query, setQuery] = useState('');
   const byId = new Map(accounts.map(item => [item.id, item]));
   const names = new Map(accounts.map(item => [item.id, item.name]));
   const superseded = new Set(records.map(item => item.supersedes).filter(Boolean));
@@ -49,22 +51,23 @@ export default function SnapshotHistory({ records = [], accounts = [], legacy = 
     }
   }
   const latest = [...groups.values()].sort((a, b) => (names.get(a.identity) || '').localeCompare(names.get(b.identity) || ''));
-  const visible = latest.filter(item => !filter || item.identity === filter);
-  const history = [...records].filter(item => !filter || (item.subjectId || item.accountId) === filter).sort(newestFirst);
-  const pages = Math.max(1, Math.ceil(visible.length / pageSize)), page = Math.min(requestedPage, pages - 1);
   const columns = [
-    ['account', 'Account', item => names.get(item.subjectId || item.accountId) || 'Archived / unregistered account'],
-    ['amount', 'Balance', item => item.amount ?? item.balance],
-    ['currency', 'Currency', item => item.currency || item.commodityCode],
-    ['period', dated ? 'Balance date' : legacy ? 'Recorded date' : 'Legacy month (actual date unknown)', item => dated ? item.observedDate : legacy ? dateLabel(item.recordedAt) : item.month],
+    ['account', 'Account', item => names.get(item.subjectId || item.accountId) || 'Archived / unregistered account', item => `${byId.get(item.subjectId || item.accountId)?.code || ''} ${names.get(item.subjectId || item.accountId) || ''}`],
+    ['amount', 'Balance', item => item.amount ?? item.balance, item => item.amount ?? item.balance],
+    ['currency', 'Currency', item => item.currency || item.commodityCode, item => item.currency || item.commodityCode],
+    ['period', dated ? 'Balance date' : legacy ? 'Recorded date' : 'Legacy month (actual date unknown)', item => dated ? item.observedDate : legacy ? dateLabel(item.recordedAt) : item.month, item => item.observedDate || item.month || item.recordedAt],
     ...(!legacy ? [['confirmed', 'Status', item => item.confirmed ? 'Confirmed' : 'Pending']] : []),
   ];
+  const visible = orderedRecords(latest.filter(item => !filter || item.identity === filter), columns, sort, descending, query);
+  const history = orderedRecords([...records].filter(item => !filter || (item.subjectId || item.accountId) === filter).sort(newestFirst), columns, sort, descending, query);
+  const pages = Math.max(1, Math.ceil(visible.length / pageSize)), page = Math.min(requestedPage, pages - 1);
   return <div className="snapshot-list">
     <div className="snapshot-toolbar"><Select label="Account filter" value={filter} onChange={value => { setFilter(value); setPage(0); }} options={[
       { value: '', label: 'All accounts' }, ...latest.map(item => ({ value: item.identity, label: names.get(item.identity) || 'Archived / unregistered account' })),
     ]}/><p>{groups.size} accounts · {records.length} recorded snapshots. Latest record per account shown; {dated ? 'balance dates are actual dates, not month ends.' : legacy ? 'submission dates are not balance dates.' : 'actual balance dates are unknown.'}</p></div>
-    <Table caption="Latest balance snapshots" rows={visible.slice(page * pageSize, (page + 1) * pageSize)} rowKey="id" columns={columns}/>
+    <ListControls label="Snapshots" columns={columns} sort={sort} setSort={value => { setSort(value); setPage(0); }} descending={descending} setDescending={value => { setDescending(value); setPage(0); }} query={query} setQuery={value => { setQuery(value); setPage(0); }}/>
+    <Table controls={false} caption="Latest balance snapshots" rows={visible.slice(page * pageSize, (page + 1) * pageSize)} rowKey="id" columns={columns}/>
     <Pager page={page} pages={pages} onChange={setPage}/>
-    {!!records.length && <details className="snapshot-history"><summary>Snapshot history · {history.length} records</summary><HistoryRows key={filter} records={history} columns={columns}/></details>}
+    {!!records.length && <details className="snapshot-history"><summary>Snapshot history · {history.length} records</summary><HistoryRows key={`${filter}/${sort}/${descending}/${query}`} records={history} columns={columns}/></details>}
   </div>;
 }

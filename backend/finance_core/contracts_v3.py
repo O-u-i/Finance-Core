@@ -496,6 +496,36 @@ class MonthlyPlanDeleteResponse(ReversibleWorkspaceLedgerResponse):
     id: str
 
 
+class PlannedCashTotal(ContractModel):
+    currency: str
+    inflow: str
+    outflow: str
+    net: str
+    count: int
+
+
+class PlannedCategoryTotal(PlannedCashTotal):
+    category: str
+
+
+class PlannedOccurrence(ContractModel):
+    plan_id: str = Field(alias='planId')
+    due_date: str = Field(alias='dueDate')
+    amount: str
+    currency: str
+    category: str
+    kind: Literal['income', 'expense']
+
+
+class MonthlyPlanReport(ContractModel):
+    month: str
+    basis: Literal['planned-only']
+    short_month_rule: Literal['last-valid-day'] = Field(alias='shortMonthRule')
+    occurrences: list[PlannedOccurrence]
+    categories: list[PlannedCategoryTotal]
+    currencies: list[PlannedCashTotal]
+
+
 class RecurringEntryRuleListResponse(WorkspaceLedgerResponse):
     data: list[RecurringEntryRule]
 

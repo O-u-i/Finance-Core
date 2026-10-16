@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { selectedMonth } from './navigation.js';
+import { orderedRecords, recordValue } from './records.js';
 export const options = values => values.map(value => ({ value, label: value }));
 
 export function Logo({ small = false }) {
@@ -27,6 +28,17 @@ export function RejectDialog({ reasons, onClose }) {
     <ul>{reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul><Button primary onClick={onClose}>Return to CSV</Button>
   </dialog>;
 }
+export function Dialog({ title, children, onClose, dismissible = true }) {
+  const dialog = useRef(null), heading = useId();
+  useEffect(() => {
+    const node = dialog.current, trigger = document.activeElement; node.showModal();
+    return () => { if (node.open) node.close(); if (trigger?.isConnected) trigger.focus({ preventScroll: true }); };
+  }, []);
+  return <dialog ref={dialog} className="detail-dialog" aria-labelledby={heading} onCancel={event => { if (dismissible) onClose(); else event.preventDefault(); }} onClose={onClose}>
+    <div className="dialog-heading"><h2 id={heading}>{title}</h2><Button type="button" disabled={!dismissible} onClick={onClose} aria-label={`Close ${title}`}>Close</Button></div>
+    {children}
+  </dialog>;
+}
 export function Panel({ title, description, action, children, className = '' }) {
   return <section className={`panel ${className}`}><div className="panel-heading"><div><h2>{title}</h2>{description && <p>{description}</p>}</div>{action}</div>{children}</section>;
 }
@@ -48,8 +60,25 @@ export function ResourceForm({ fc, fields, initial = {}, immutable = [], submitL
     {options ? <select name={name} defaultValue={initial[name] ?? options[0]?.value}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : type === 'textarea' ? <textarea name={name} rows={2} defaultValue={initial[name] ?? ''} maxLength={4000} required={name !== 'note'}/> : <input name={name} type={type} defaultValue={initial[name] ?? ''} readOnly={immutable.includes(name)} required={!['note', 'subtype', 'payee', 'reference', 'linkedAccountId', 'startMonth', 'endMonth', 'successorOf', 'legacyLivingId'].includes(name)} inputMode={['amount', 'balance', 'price', 'purchaseCost', 'ownershipShare'].includes(name) ? 'decimal' : undefined}/>}
   </Field>)}</div><Button type="submit" primary>{submitLabel}</Button></fieldset></form>;
 }
-export function Table({ columns, rows = [], rowKey, caption }) {
-  return rows.length ? <div className="table-wrap" tabIndex={0} role="region" aria-label={caption || 'Records'}><table><caption className="sr-only">{caption || 'Records'}</caption><thead><tr>{columns.map(([key, label]) => <th key={key} scope="col">{label}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={rowKey ? row[rowKey] : index}>{columns.map(([key, , render]) => <td key={key}>{render ? render(row) : String(row[key] ?? '—')}</td>)}</tr>)}</tbody></table></div> : <Empty/>;
+export function ListControls({ label = 'Records', columns, sort, setSort, descending, setDescending, query, setQuery }) {
+  return <div className="list-controls" role="group" aria-label={`${label} filters`}>
+    {query !== undefined && <Field label={`Filter ${label}`}><input type="search" value={query} placeholder="Search records" onChange={event => setQuery(event.target.value)}/></Field>}
+    <Select label="Sort by" value={sort} onChange={setSort} options={columns.map(([value, label]) => ({ value, label }))}/>
+    <Button type="button" className="sort-direction" aria-label={descending ? 'Sort ascending' : 'Sort descending'} title={descending ? 'Switch to ascending order' : 'Switch to descending order'} onClick={() => setDescending(!descending)}><span aria-hidden="true">{descending ? '↓' : '↑'}</span>{descending ? 'Descending' : 'Ascending'}</Button>
+  </div>;
+}
+export function Table({ columns, rows = [], rowKey, caption = 'Records', controls = true }) {
+  const records = Array.isArray(rows) ? rows : [];
+  const sortable = columns.filter(column => !['actions', 'details', 'record'].includes(column[0]) && records.some(row => {
+    const value = recordValue(row, column); return value != null && ['string', 'number', 'boolean'].includes(typeof value);
+  }));
+  const [chosen, setSort] = useState(''), [descending, setDescending] = useState(false), [query, setQuery] = useState('');
+  const sort = sortable.some(column => column[0] === chosen) ? chosen : sortable[0]?.[0] || '';
+  const visible = controls ? orderedRecords(records, sortable, sort, descending, query) : records;
+  return <div className="record-list">
+    {controls && records.length > 0 && sortable.length > 0 && <ListControls label={caption} columns={sortable} sort={sort} setSort={setSort} descending={descending} setDescending={setDescending} query={query} setQuery={setQuery}/>}
+    {visible.length ? <div className="table-wrap" tabIndex={0} role="region" aria-label={caption}><table><caption className="sr-only">{caption}</caption><thead><tr>{columns.map(([key, label]) => <th key={key} scope="col" aria-sort={controls && sort === key ? descending ? 'descending' : 'ascending' : undefined}>{label}</th>)}</tr></thead><tbody>{visible.map((row, index) => <tr key={rowKey ? row[rowKey] : row.id || index}>{columns.map(([key, , render]) => <td key={key}>{render ? render(row) : String(row[key] ?? '—')}</td>)}</tr>)}</tbody></table></div> : <Empty>{records.length ? 'No records match these filters.' : 'No records yet.'}</Empty>}
+  </div>;
 }
 export function Tabs({ items, value, onChange }) {
   return <nav className="subnav" aria-label="Page sections">{items.map(([key, label]) => <button key={key} aria-current={value === key ? 'page' : undefined} className={value === key ? 'selected' : ''} onClick={() => onChange(key)}>{label}</button>)}</nav>;
@@ -136,7 +165,7 @@ export function Select({ label, value, defaultValue, onChange, options = [], dis
     <label id={`${id}-label`} htmlFor={`${id}-native`}>{label}</label>
     <select ref={native} className="select-native" id={`${id}-native`} name={name} required={required} value={actual} disabled={disabled} onChange={(e) => { setLocalValue(e.target.value); onChange?.(e.target.value, options.find((option) => option.value === e.target.value)); }}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
     <div className="select-custom"><button type="button" ref={trigger} aria-labelledby={`${id}-label ${id}-value`} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? `${id}-list` : undefined} disabled={disabled || !options.length} onClick={() => { setIndex(Math.max(0, selected)); setOpen(!open); }} onKeyDown={(event) => { if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); setIndex(Math.max(0, selected)); setOpen(true); } }}><span id={`${id}-value`}>{options[selected]?.label || 'Select an option'}</span><svg className={open ? 'select-chevron open' : 'select-chevron'} viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6"/></svg></button>
-    {open && position && createPortal(<ul ref={list} id={`${id}-list`} style={position} className="select-menu glide-menu" role="listbox" tabIndex={0} aria-labelledby={`${id}-label`} aria-activedescendant={`${id}-${index}`} onKeyDown={keyDown} onBlur={(event) => { if (!root.current?.contains(event.relatedTarget) && !list.current?.contains(event.relatedTarget)) setOpen(false); }}><li className="select-highlight" aria-hidden="true" role="presentation" style={highlight || { opacity: 0 }}/>{options.map((option, i) => <li data-index={i} id={`${id}-${i}`} key={option.value} role="option" aria-selected={actual === option.value} onPointerMove={() => setIndex(i)} onClick={() => choose(i)}><span>{option.label}</span><span className="option-meta">{showTags && option.tag && <small>{option.tag}</small>}{actual === option.value && <span aria-hidden="true">✓</span>}</span></li>)}</ul>, document.body)}
+    {open && position && createPortal(<ul ref={list} id={`${id}-list`} style={position} className="select-menu glide-menu" role="listbox" tabIndex={0} aria-labelledby={`${id}-label`} aria-activedescendant={`${id}-${index}`} onKeyDown={keyDown} onBlur={(event) => { if (!root.current?.contains(event.relatedTarget) && !list.current?.contains(event.relatedTarget)) setOpen(false); }}><li className="select-highlight" aria-hidden="true" role="presentation" style={highlight || { opacity: 0 }}/>{options.map((option, i) => <li data-index={i} id={`${id}-${i}`} key={option.value} role="option" aria-selected={actual === option.value} onPointerMove={() => setIndex(i)} onClick={() => choose(i)}><span>{option.label}</span><span className="option-meta">{showTags && option.tag && <small>{option.tag}</small>}{actual === option.value && <span aria-hidden="true">✓</span>}</span></li>)}</ul>, root.current?.closest('dialog[open]') || document.body)}
     </div>
   </div>;
 }

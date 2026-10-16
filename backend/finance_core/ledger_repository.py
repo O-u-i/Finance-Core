@@ -142,6 +142,13 @@ class LedgerRepository:
         for code in item.allowed_commodity_codes:
             if self.get_commodity(code) is None:
                 raise ValueError("Account references an unknown commodity.")
+        unified = None
+        if self.connection.execute("SELECT 1 FROM sqlite_master WHERE name='financial_accounts_v3'").fetchone():
+            unified = self.connection.execute('SELECT payload_json FROM financial_accounts_v3 WHERE ledger_account_id=?', (item.id,)).fetchone()
+        if unified and not create and PersonalFinanceSnapshot(self.connection).account_is_referenced(item.id):
+            previous = json.loads(unified['payload_json'])
+            if previous['type'] != item.type or previous['allowedCommodityCodes'] != item.allowed_commodity_codes:
+                raise ValueError('Used unified accounts lock accounting type and commodities. Register an explicit successor.')
         values = (
             item.code,
             item.name,
@@ -162,11 +169,9 @@ class LedgerRepository:
             )
             if result.rowcount == 0:
                 raise LookupError("Account was not found.")
-        if self.connection.execute("SELECT 1 FROM sqlite_master WHERE name='financial_accounts_v3'").fetchone():
-            row = self.connection.execute('SELECT payload_json FROM financial_accounts_v3 WHERE ledger_account_id=?',(item.id,)).fetchone()
-            if row:
-                payload = {**json.loads(row['payload_json']),**dump(item)}
-                self.connection.execute('UPDATE financial_accounts_v3 SET payload_json=? WHERE id=?',(json.dumps(payload,ensure_ascii=False,separators=(',',':')),item.id))
+        if unified:
+            payload = {**json.loads(unified['payload_json']),**dump(item)}
+            self.connection.execute('UPDATE financial_accounts_v3 SET payload_json=? WHERE id=?',(json.dumps(payload,ensure_ascii=False,separators=(',',':')),item.id))
 
     def list_price_quotes(self) -> list[PriceQuote]:
         rows = self.connection.execute("SELECT * FROM price_quotes_v2 ORDER BY as_of DESC, id").fetchall()

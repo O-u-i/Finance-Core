@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { id, localDate, validationMatches } from '../api.js';
-import { Button, Empty, Field, Panel, StepContent, Steps, Table } from '../components.jsx';
+import { Button, Empty, Field, ListControls, Panel, StepContent, Steps, Table } from '../components.jsx';
+import { orderedRecords } from '../records.js';
 
 const blankPosting = (accounts = [], commodity = 'USD', index = 0) => ({ id: id('posting'), accountId: accounts[index]?.id || accounts[0]?.id || '', side: index ? 'credit' : 'debit', units: '1', commodityCode: commodity, memo: '', cashFlowCategory: 'other', lotAllocations: [] });
 const blankDraft = (data) => {
@@ -9,6 +10,15 @@ const blankDraft = (data) => {
 };
 const active = (items = []) => items.filter((item) => item.status === 'active');
 const pathId = (value) => encodeURIComponent(value);
+
+function JournalRecords({ label, records = [], children }) {
+  const [sort, setSort] = useState('date'), [descending, setDescending] = useState(true), [query, setQuery] = useState('');
+  const columns = [['date', 'Date'], ['description', 'Description'], ['balancingCommodityCode', 'Currency']];
+  const visible = orderedRecords(records, columns, sort, descending, query);
+  return <><ListControls label={label} columns={columns} sort={sort} setSort={setSort} descending={descending} setDescending={setDescending} query={query} setQuery={setQuery}/>
+    {visible.length ? <div className="record-list">{visible.map(children)}</div> : <Empty>{records.length ? 'No records match these filters.' : `No ${label.toLowerCase()}.`}</Empty>}
+  </>;
+}
 
 export default function Journal({ fc }) {
   const [editor, setEditor] = useState(() => blankDraft(fc.data));
@@ -93,10 +103,10 @@ export default function Journal({ fc }) {
       </form>
     </Panel>
     <Panel title="Unposted drafts" description="Drafts stay outside the ledger until posted.">
-      {fc.data.drafts?.length ? <div className="record-list">{fc.data.drafts.map(({ draft }) => <article key={draft.id}><div><strong>{draft.description}</strong><small>{draft.date} · {draft.postings.length} postings</small></div><div className="actions"><Button disabled={fc.busy} onClick={() => openDraft(draft)}>Review</Button><Button danger disabled={fc.busy || fc.readonly} onClick={() => { if (confirm('Delete this unposted draft?')) fc.ledger(`/journal-entry-drafts/${pathId(draft.id)}`, { method: 'DELETE' }, 'Draft deleted.'); }}>Delete</Button></div></article>)}</div> : <Empty>No unposted drafts.</Empty>}
+      <JournalRecords label="Unposted drafts" records={fc.data.drafts?.map(item => item.draft)}>{draft => <article key={draft.id}><div><strong>{draft.description}</strong><small>{draft.date} · {draft.postings.length} postings</small></div><div className="actions"><Button disabled={fc.busy} onClick={() => openDraft(draft)}>Review</Button><Button danger disabled={fc.busy || fc.readonly} onClick={() => { if (confirm('Delete this unposted draft?')) fc.ledger(`/journal-entry-drafts/${pathId(draft.id)}`, { method: 'DELETE' }, 'Draft deleted.'); }}>Delete</Button></div></article>}</JournalRecords>
     </Panel>
     <Panel title="Posted journal" description="Every correction retains the original entry and adds a linked reversal.">
-      {fc.data.entries?.length ? <div className="record-list">{fc.data.entries.map((entry) => <article key={entry.id}><div><strong>{entry.description}</strong><small>{entry.date} · {entry.balancingCommodityCode}{entry.reversalOf ? ' · Linked reversal' : ''}</small><details><summary>View postings</summary><Table rows={entry.postings} columns={[["accountId", 'Account'], ['side', 'Side'], ['units', 'Units'], ['commodityCode', 'Commodity'], ['valuationAmount', 'Valuation'], ['memo', 'Note']]}/></details></div>{!entry.reversalOf && <Button danger disabled={fc.busy || fc.readonly} onClick={() => { if (confirm('Create a linked reversal? The original entry will remain.')) fc.ledger(`/journal-entries/${pathId(entry.id)}/reverse`, { method: 'POST' }, 'Linked reversal created.'); }}>Reverse</Button>}</article>)}</div> : <Empty>No posted entries.</Empty>}
+      <JournalRecords label="Posted journal" records={fc.data.entries}>{entry => <article key={entry.id}><div><strong>{entry.description}</strong><small>{entry.date} · {entry.balancingCommodityCode}{entry.reversalOf ? ' · Linked reversal' : ''}</small><details><summary>View postings</summary><Table rows={entry.postings} columns={[["accountId", 'Account'], ['side', 'Side'], ['units', 'Units'], ['commodityCode', 'Commodity'], ['valuationAmount', 'Valuation'], ['memo', 'Note']]}/></details></div>{!entry.reversalOf && <Button danger disabled={fc.busy || fc.readonly} onClick={() => { if (confirm('Create a linked reversal? The original entry will remain.')) fc.ledger(`/journal-entries/${pathId(entry.id)}/reverse`, { method: 'POST' }, 'Linked reversal created.'); }}>Reverse</Button>}</article>}</JournalRecords>
     </Panel>
   </>;
 }

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { SegmentExport } from './SegmentData.jsx';
+import AtomicBatch from './AtomicBatch.jsx';
 import { downloadPrivate, id, localDate } from '../api.js';
 import { checkImportCSV, mapAccountingCSV, csvCommodityIssues, isSingleCurrencyCSV } from '../csv.js';
 import { Button, Field, Panel, ResourceForm, RejectDialog, Select, StepContent, Steps, Table, Tabs } from '../components.jsx';
@@ -82,7 +83,6 @@ export default function Data({ fc }) {
   const items = [['import', 'Import'], ['backup', 'Segment export'], ['recurring', 'Recurring drafts'], ['batch', 'Atomic batch']];
   const tab = items.some(([key]) => key === fc.route.tab) ? fc.route.tab : 'import';
   const drafts = (fc.data.drafts || []).map(({ draft }) => ({ value: draft.id, label: draft.description }));
-  const [batch, setBatch] = useState('');
   return <><Tabs items={items} value={tab} onChange={(value) => fc.navigate('data', value)}/>
     {tab === 'recurring' && <Panel title="Recurring draft templates" description="Choose a saved Journal draft as the template. Due dates generate drafts, never posted facts." action={<Button disabled={fc.busy || fc.readonly} onClick={() => fc.ledger('/recurring-entry-rules/generate-due', { method: 'POST', body: { asOf: localDate() } }, 'Due drafts generated.')}>Generate due drafts</Button>}>
       {!drafts.length && <p>Save a draft in Journal to create your first template.</p>}
@@ -97,7 +97,7 @@ export default function Data({ fc }) {
       }}/><Table rows={fc.data.recurring} columns={[['name', 'Name'], ['dayOfMonth', 'Day'], ['startDate', 'Start date'], ['enabled', 'Status', (item) => item.enabled ? 'Enabled' : 'Disabled'], ['actions', 'Actions', (item) => <div className="actions"><Button disabled={fc.busy || fc.readonly} onClick={() => fc.ledger(`/recurring-entry-rules/${encodeURIComponent(item.id)}`, { method: 'PUT', body: { ...item, enabled: !item.enabled } }, 'Rule updated.')}>{item.enabled ? 'Disable' : 'Enable'}</Button><Button danger disabled={fc.busy || fc.readonly} onClick={() => { if (confirm('Delete this recurring rule?')) fc.ledger(`/recurring-entry-rules/${encodeURIComponent(item.id)}`, { method: 'DELETE' }, 'Rule deleted.'); }}>Delete</Button></div>]]}/>
     </Panel>}
     {tab === 'import' && <Import fc={fc}/>}
-    {tab === 'batch' && <Panel title="Atomic mutable batch" description="Only commodities, accounts, price quotes and drafts. Posting and reversal remain separate operations."><fieldset disabled={fc.busy || fc.readonly}><Field label="Batch JSON"><textarea rows={10} value={batch} onChange={(e) => { setBatch(e.target.value); fc.markDirty(); }} placeholder='{"commodities":[],"accounts":[],"drafts":[]}'/></Field><Button primary disabled={!batch.trim()} onClick={async () => { try { const body = JSON.parse(batch); if (confirm('Validate and execute this mutable batch atomically?')) { if (await fc.ledger('/batch', { method: 'POST', body }, 'Mutable batch completed atomically.')) { fc.clean(); setBatch(''); } } } catch { fc.setNotice({ error: true, text: 'Batch must be valid JSON.' }); } }}>Validate and execute</Button></fieldset></Panel>}
+    {tab === 'batch' && <AtomicBatch fc={fc}/>}
     {tab === 'backup' && <SegmentExport fc={fc} segment="investment"/>}
   </>;
 }
