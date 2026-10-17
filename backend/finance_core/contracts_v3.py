@@ -97,6 +97,19 @@ class MeResponse(ContractModel):
     data: Me
 
 
+class CurrentAccessToken(ContractModel):
+    token_id: str = Field(alias="tokenId")
+    actor_kind: Literal["token"] = Field(alias="actorKind")
+    status: Literal["active"]
+    workspace_ids: list[str] = Field(alias="workspaceIds")
+    scopes: list[Literal["ledger:read", "ledger:write"]]
+    expires_at: str | None = Field(alias="expiresAt")
+
+
+class CurrentAccessTokenResponse(ContractModel):
+    data: CurrentAccessToken
+
+
 class Workspace(ContractModel):
     id: str
     slug: str

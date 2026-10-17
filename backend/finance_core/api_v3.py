@@ -13,6 +13,7 @@ from finance_core import __version__
 from finance_core.api_v2 import create_v2_router
 from finance_core.contracts_v3 import (
     BEARER_OR_SESSION_SECURITY,
+    CurrentAccessTokenResponse,
     HealthResponse,
     LedgerResponse,
     MeResponse,
@@ -203,6 +204,19 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
                 "actorKind": actor.kind,
             }
         }
+
+    @router.get(
+        "/access-token-self", response_model=CurrentAccessTokenResponse, responses=STANDARD_ERROR_RESPONSES,
+        openapi_extra={"security": [{"BearerAccessToken": []}], "x-fc-required-actor": "access-token"},
+    )
+    def current_access_token(actor: Actor = Depends(authenticate)) -> dict[str, Any]:
+        if actor.kind != "token":
+            raise HTTPException(403, detail={"code": "TOKEN_SCOPE_DENIED", "message": "An access token is required."})
+        return {"data": {
+            "tokenId": actor.actor_id, "actorKind": "token", "status": "active",
+            "workspaceIds": sorted(actor.workspace_ids), "scopes": sorted(actor.scopes),
+            "expiresAt": actor.expires_at,
+        }}
 
     @router.get(
         "/workspaces", response_model=WorkspaceListResponse, responses=STANDARD_ERROR_RESPONSES,

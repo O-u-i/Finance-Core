@@ -56,6 +56,7 @@ class Actor:
     user_id: str
     workspace_ids: frozenset[str]
     scopes: frozenset[str]
+    expires_at: str | None = None
 
     @property
     def is_admin(self) -> bool:
@@ -535,6 +536,7 @@ class Registry:
         return Actor(
             "token", row["id"], OWNER_USER_ID,
             frozenset(json.loads(row["workspace_ids_json"])), frozenset(json.loads(row["scopes_json"])),
+            row["expires_at"],
         )
 
     @synchronized
