@@ -44,10 +44,27 @@ test('branched navigation exposes page headings as controlled second-level desti
 
 test('branched navigation retains multiple independently open groups instead of a route-only accordion', async () => {
   const { default: Menu } = await server.ssrLoadModule('/demo/src/BranchedMenu.jsx');
-  const html = render(Menu, { items:[{key:'journal',label:'Journal',children:[{key:'drafts',label:'Unposted drafts'}]},
-    {key:'review',label:'Monthly review',children:[{key:'close',label:'Immutable month close'}]}], activeKey:'review',defaultOpen:['journal','review'] });
+  const html = render(Menu, { items:[{key:'journal',label:'Journal',children:[{key:'drafts',label:'Unposted drafts'},{key:'entries',label:'Posted journal'}]},
+    {key:'review',label:'Monthly review',children:[{key:'review-body',label:'Investment monthly review'},{key:'close',label:'Immutable month close'}]}], activeKey:'review',defaultOpen:['journal','review'] });
   assert.equal((html.match(/aria-expanded="true"/g)||[]).length,2);
   assert.doesNotMatch(html,/hidden=""/);
+});
+
+test('single-section pages do not repeat their heading as a branch; folded groups stay inert for a CSS transition', async () => {
+  const { default: Menu } = await server.ssrLoadModule('/demo/src/BranchedMenu.jsx');
+  const html = render(Menu,{items:[{key:'positions',label:'Securities & positions',children:[{key:'one',label:'Securities & positions'}]},
+    {key:'journal',label:'Journal',children:[{key:'drafts',label:'Unposted drafts'},{key:'entries',label:'Posted journal'}]}],activeKey:'positions'});
+  assert.equal((html.match(/Securities &amp; positions/g)||[]).length,1);
+  assert.match(html,/branched-menu__fold/); assert.match(html,/inert=""/);
+  assert.doesNotMatch(html,/ hidden=""/);
+});
+
+test('legacy review has compact controls and stable sections even without activity, with completeness visible', async () => {
+  const { default: Review } = await server.ssrLoadModule('/demo/src/pages/MonthlyReview.jsx');
+  const html = render(Review,{fc:{route:{view:'monthlyreview'},data:{monthlyReview:{month:'2026-09',status:'ready',months:[{month:'2026-09',currencies:[]}],windowStart:'2026-07-01',windowEndExclusive:'2026-10-01',calculationVersion:'monthly-activity-v1',openingEntryIds:[]}}}});
+  assert.match(html,/Three-month comparison/); assert.match(html,/Corrections and coverage/);
+  assert.match(html,/External completeness unknown/); assert.match(html,/Calculation and source revision/);
+  assert.doesNotMatch(html,/Your month, in context|CLOSED-MONTH REVIEW/);
 });
 
 test('record tables expose sort direction and order decimal strings without losing precision', () => {
@@ -114,6 +131,7 @@ test('shared date, month and file controls have English application-owned afford
     if (type === 'file') { assert.match(html, /Choose file/); assert.match(html, /No file selected/); }
     else { assert.match(html, /type="text"/); assert.match(html, /YYYY-MM/); }
   }
+  assert.doesNotMatch(render(components.Field,{label:'Journal date',type:'date',required:true}),/type="date"/);
 });
 
 test('Asset rows prioritize server valuation and status; Note and forms are secondary dialog content', async () => {

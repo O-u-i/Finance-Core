@@ -23,6 +23,30 @@ export const segmentViews = {
 };
 export const configurationViews = ['overview', 'master', 'settings'];
 
+// Page destinations are owned by the feature, never inferred from the visible tab's DOM.
+const sections = {
+  journal: [['drafts','Unposted drafts'],['entries','Posted journal']],
+  assets: [['valuations','Asset valuations'],['liabilities','Personal liabilities']],
+  plans: [['plan-editor','Cash-flow plans'],['manage','Manage plans'],['totals','Scheduled category totals']],
+  monthlyreview: [['review','Investment monthly review'],['close','Immutable month close']],
+  legacyreview: [['comparison','Three-month comparison'],['coverage','Corrections and coverage']],
+  livingdata: [['import','Import legacy monthly observations'],['export','Living export']],
+  data: [['import','Import drafts','Import'],['backup','Investment export','Segment export'],['recurring','Recurring draft templates','Recurring drafts'],['batch','Atomic batch creation','Atomic batch']],
+  planning: [['accounts','Living accounts','Living accounts'],['snapshots','Balance snapshots','Snapshots'],['plans','Cash-flow plans','Cash-flow plans'],['summary','Living balance summary','Summary']],
+  settings: [['configuration','Workspace configuration'],['export','Export & backup'],['restore','Restore an empty ledger'],['workspaces','Workspaces'],['api','API access'],['about','About Finance Core']],
+};
+export function pageSections(view, legacy = false) {
+  let values = sections[view] || [];
+  if (legacy) {
+    if (view === 'balances') values = sections.planning.slice(0,2);
+    if (view === 'monthlyreview') values = sections.legacyreview;
+    if (view === 'data') values = sections.data.map(item => item[0] === 'backup' ? [item[0],'Legacy ledger export',item[2]] : item);
+    if (['assets','livingdata','livingreview'].includes(view)) values = [];
+  }
+  return values.map(([key,label,tabLabel]) => ({key,label,...(tabLabel ? {tab:key,tabLabel} : {})}));
+}
+export const pageTabs = (view, legacy = false) => pageSections(view,legacy).filter(item => item.tab).map(item => [item.tab,item.tabLabel]);
+
 export function masterSections(legacy = false) {
   return [['commodities','Commodities'],['accounts','Accounts'],['prices','Prices'], ...(!legacy ? [['opening','Opening balances'],['ownership','Ownership & agreements']] : [])];
 }
@@ -92,16 +116,16 @@ export function routeHash({ view, tab = '', segment = '', month = '' }) {
 }
 
 // Configuration readiness describes available records; financial validation stays on the backend.
-export function assessSetup({ loaded, workspace, actor, commodities = [], accounts = [], financialAccounts = [] }) {
+export function assessSetup({ loaded, error = false, settingsError = false, workspace, actor, commodities = [], accounts = [], financialAccounts = [] }) {
   const sessionReady = actor?.actorKind === 'session' && actor.status === 'active';
-  const workspaceReady = !!workspace && ['active', 'archived'].includes(workspace.status);
+  const workspaceReady = !settingsError && !!workspace && ['active', 'archived'].includes(workspace.status);
   const currencies = commodities.filter(item => item.status === 'active' && item.kind === 'currency');
   const activeAccounts = accounts.filter(item => item.status === 'active');
   const usableCurrency = currencies.find(currency => activeAccounts.filter(account => account.allowedCommodityCodes?.includes(currency.code)).length >= 2 || financialAccounts.some(account => account.segment === 'living' && account.status === 'active' && account.allowedCommodityCodes?.includes(currency.code)));
-  const masterReady = !!loaded && !!usableCurrency;
-  return { loaded: !!loaded, sessionReady, workspaceReady, masterReady, ready: sessionReady && workspaceReady && masterReady,
+  const masterReady = !!loaded && !error && !!usableCurrency;
+  return { loaded: !!loaded, error:!!error, settingsError:!!settingsError, sessionReady, workspaceReady, masterReady, ready: sessionReady && workspaceReady && masterReady,
     currencyCount: currencies.length, accountCount: financialAccounts.length || activeAccounts.length,
     missing: [!sessionReady && 'An authenticated owner session is required.', !workspaceReady && 'Select an available Workspace in Settings.',
-      !loaded && 'Configuration has not been checked yet.', loaded && !currencies.length && 'Add at least one active currency in Master data.',
+      !loaded && 'Configuration has not been checked yet.', error && 'Configuration could not be verified. Retry the configuration check.', loaded && !currencies.length && 'Add at least one active currency in Master data.',
       loaded && !usableCurrency && 'Add two Investment ledger accounts for one active currency, or one registered monthly Living account.'].filter(Boolean) };
 }

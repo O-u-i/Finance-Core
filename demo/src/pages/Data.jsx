@@ -3,7 +3,8 @@ import { SegmentExport } from './SegmentData.jsx';
 import AtomicBatch from './AtomicBatch.jsx';
 import { downloadPrivate, id, localDate } from '../api.js';
 import { checkImportCSV, mapAccountingCSV, csvCommodityIssues, isSingleCurrencyCSV } from '../csv.js';
-import { Button, Field, Panel, ResourceForm, RejectDialog, Select, StepContent, Steps, Table, Tabs } from '../components.jsx';
+import { Button, Field, Panel, ResourceForm, RejectDialog, Select, StepContent, Steps, Table } from '../components.jsx';
+import { pageTabs } from '../navigation.js';
 
 function Import({ fc }) {
   const [format, setFormat] = useState('csv'), [input, setInput] = useState(''), [checked, setChecked] = useState(null), [step, setStep] = useState(0);
@@ -80,10 +81,10 @@ export function Backup({ fc }) {
 }
 
 export default function Data({ fc }) {
-  const items = [['import', 'Import'], ['backup', 'Segment export'], ['recurring', 'Recurring drafts'], ['batch', 'Atomic batch']];
+  const items = pageTabs('data',fc.migrationRequired);
   const tab = items.some(([key]) => key === fc.route.tab) ? fc.route.tab : 'import';
   const drafts = (fc.data.drafts || []).map(({ draft }) => ({ value: draft.id, label: draft.description }));
-  return <><Tabs items={items} value={tab} onChange={(value) => fc.navigate('data', value)}/>
+  return <>
     {tab === 'recurring' && <Panel title="Recurring draft templates" description="Choose a saved Journal draft as the template. Due dates generate drafts, never posted facts." action={<Button disabled={fc.busy || fc.readonly} onClick={() => fc.ledger('/recurring-entry-rules/generate-due', { method: 'POST', body: { asOf: localDate() } }, 'Due drafts generated.')}>Generate due drafts</Button>}>
       {!drafts.length && <p>Save a draft in Journal to create your first template.</p>}
       <ResourceForm fc={fc} initial={{ dayOfMonth: 1, startDate: localDate() }} fields={[

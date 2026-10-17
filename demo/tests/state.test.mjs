@@ -55,6 +55,13 @@ test('schema-3 view reads clear migration state; auth failures are never partial
   await assert.rejects(readLedgerPaths(api,'new-vault',{financialAccounts:'/financial-accounts'}),error => error.status===401);
 });
 
+test('configuration read failures are distinguishable from an unrelated report failure', async () => {
+  const api={async ledger() { throw Object.assign(new Error('Synthetic unavailable'),{status:503}); }};
+  await assert.rejects(readLedgerPaths(api,'synthetic',{commodities:'/commodities'}),error => error.configurationError && !error.settingsError);
+  await assert.rejects(readLedgerPaths(api,'synthetic',{ledgerHealth:'/health'}),error => error.configurationError && error.settingsError);
+  await assert.rejects(readLedgerPaths(api,'synthetic',{report:'/reports/synthetic'}),error => !error.configurationError);
+});
+
 test('shared private downloads stay Workspace scoped and preserve JSON decimals and one CSV BOM', async t => {
   const blobs = [], revoked = [], calls = [], links = [];
   const documentBefore = globalThis.document;

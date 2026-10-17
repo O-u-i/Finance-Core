@@ -87,7 +87,11 @@ export async function readLedgerPaths(api, workspaceId, paths, signal) {
       const payload = await api.ledger(workspaceId, path, { signal });
       return [key, Object.hasOwn(payload, 'data') ? payload.data : payload];
     } catch (error) {
-      if (error.code !== 'SCHEMA_MIGRATION_REQUIRED') throw error;
+      if (error.code !== 'SCHEMA_MIGRATION_REQUIRED') {
+        error.configurationError = ['ledgerHealth','commodities','accounts','financialAccounts'].includes(key);
+        error.settingsError = key === 'ledgerHealth';
+        throw error;
+      }
       migrationRequired = true;
       return [key, undefined];
     }

@@ -29,14 +29,14 @@ export function RejectDialog({ reasons, onClose }) {
     <ul>{reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul><Button primary onClick={onClose}>Return to CSV</Button>
   </dialog>;
 }
-export function Dialog({ title, children, onClose, dismissible = true }) {
+export function Dialog({ title, children, onClose, dismissible = true, actions }) {
   const dialog = useRef(null), heading = useId();
   useEffect(() => {
     const node = dialog.current, trigger = document.activeElement; node.showModal();
     return () => { if (node.open) node.close(); if (trigger?.isConnected) trigger.focus({ preventScroll: true }); };
   }, []);
   return <dialog ref={dialog} className="detail-dialog" aria-labelledby={heading} onCancel={event => { event.preventDefault(); if (dismissible) onClose(); }} onClose={onClose}>
-    <div className="dialog-heading"><h2 id={heading}>{title}</h2><Button type="button" disabled={!dismissible} onClick={onClose} aria-label={`Close ${title}`}>Close</Button></div>
+    <div className="dialog-heading"><h2 id={heading}>{title}</h2><div className="actions">{actions}<Button type="button" autoFocus={!!actions} disabled={!dismissible} onClick={onClose} aria-label={`Close ${title}`}>Close</Button></div></div>
     {children}
   </dialog>;
 }
@@ -67,9 +67,9 @@ export function RecordRow({ title, meta, amount, currency, status, actions, clas
     <div className="record-actions">{actions}</div>
   </article>;
 }
-export function Panel({ title, description, notice, action, children, className = '' }) {
+export function Panel({ title, sectionKey, description, notice, action, children, className = '' }) {
   const section = useId();
-  return <section id={`section-${section}`} data-section-title={typeof title === 'string' ? title : undefined} className={`panel ${className}`}><div className="panel-heading"><div className="panel-title"><h2 tabIndex={-1}>{title}</h2>{description && <Help label={typeof title === 'string' ? title : 'Help'}>{description}</Help>}</div>{action}</div>{notice && <p className="notice">{notice}</p>}{children}</section>;
+  return <section id={`section-${section}`} data-section-key={sectionKey} data-section-title={typeof title === 'string' ? title : undefined} className={`panel ${className}`}><div className="panel-heading"><div className="panel-title"><h2 tabIndex={-1}>{title}</h2>{description && <Help label={typeof title === 'string' ? title : 'Help'}>{description}</Help>}</div>{action}</div>{notice && <p className="notice">{notice}</p>}{children}</section>;
 }
 export function Field({ label, help, children, ...props }) {
   const id = useId();
@@ -78,9 +78,10 @@ export function Field({ label, help, children, ...props }) {
     return <Select label={label} {...children.props} options={options} onChange={children.props.onChange ? (value) => children.props.onChange({ target: { value } }) : undefined}/>;
   }
   let control = children ? React.cloneElement(children, { id }) : <input id={id} {...props}/>;
-  if (children?.type === 'input') {
-    if (['date','month','datetime-local'].includes(children.props.type)) control = <DateInput {...children.props} id={id} label={label}/>;
-    if (children.props.type === 'file') control = <FileInput {...children.props} id={id}/>;
+  const inputProps = children?.type === 'input' ? children.props : !children ? props : null;
+  if (inputProps) {
+    if (['date','month','datetime-local'].includes(inputProps.type)) control = <DateInput {...inputProps} id={id} label={label}/>;
+    if (inputProps.type === 'file') control = <FileInput {...inputProps} id={id}/>;
   }
   return <div className="field"><label htmlFor={id}>{label}{help && <> <Help label={label}>{help}</Help></>}</label>{control}</div>;
 }
@@ -114,16 +115,16 @@ export function Table({ columns, rows = [], rowKey, caption = 'Records', control
     {visible.length ? <div className="table-wrap" tabIndex={0} role="region" aria-label={caption}><table><caption className="sr-only">{caption}</caption><thead><tr>{columns.map(([key, label]) => <th key={key} scope="col" aria-sort={controls && sort === key ? descending ? 'descending' : 'ascending' : undefined}>{label}</th>)}</tr></thead><tbody>{visible.map((row, index) => <tr key={rowKey ? row[rowKey] : row.id || index}>{columns.map(([key, , render]) => <td key={key}>{render ? render(row) : String(row[key] ?? '—')}</td>)}</tr>)}</tbody></table></div> : <Empty>{records.length ? 'No records match these filters.' : 'No records yet.'}</Empty>}
   </div>;
 }
-export function Tabs({ items, value, onChange }) {
-  return <nav className="subnav" aria-label="Page sections">{items.map(([key, label]) => <button key={key} aria-current={value === key ? 'page' : undefined} className={value === key ? 'selected' : ''} onClick={() => onChange(key)}>{label}</button>)}</nav>;
+export function Tabs({ items, value, onChange, disabled = false }) {
+  return <nav className="subnav" aria-label="Page sections">{items.map(([key, label]) => <button key={key} disabled={disabled} aria-current={value === key ? 'page' : undefined} className={value === key ? 'selected' : ''} onClick={() => onChange(key)}>{label}</button>)}</nav>;
 }
 
-export function SummaryCards({ rows = [], columns, label = 'Account summaries' }) {
+export function SummaryCards({ rows = [], columns, label = 'Account summaries', controls = true }) {
   const [query,setQuery] = useState(''), [sort,setSort] = useState(columns[0][0]), [descending,setDescending] = useState(false);
   const visible = orderedRecords(rows, columns, sort, descending, query);
   const display = (row, [key,,render]) => render ? render(row) : String(row[key] ?? 'Unknown');
   return <div className="account-summaries">
-    {!!rows.length && <ListControls label={label} columns={columns.filter(([key]) => !['details','actions'].includes(key))} sort={sort} setSort={setSort} descending={descending} setDescending={setDescending} query={query} setQuery={setQuery}/>}
+    {controls && !!rows.length && <ListControls label={label} columns={columns.filter(([key]) => !['details','actions'].includes(key))} sort={sort} setSort={setSort} descending={descending} setDescending={setDescending} query={query} setQuery={setQuery}/>}
     <div className="summary-card-grid" role="list" aria-label={label}>{visible.map((row,index) => <article className="summary-card" role="listitem" key={row.accountId || row.id || index}>
       <h3>{display(row, columns[0])}</h3><dl>{columns.slice(1).map(column => <div key={column[0]}><dt>{column[1]}</dt><dd>{display(row,column)}</dd></div>)}</dl>
     </article>)}</div>{!visible.length && <Empty>{rows.length ? 'No accounts match these filters.' : 'No records yet.'}</Empty>}
@@ -133,17 +134,17 @@ export function Steps({ labels, current }) {
   return <ol className="stepper" aria-label="Progress">{labels.map((label, index) => <li key={label} className={`${index <= current ? 'reached' : ''} ${index === current ? 'current' : ''}`} aria-current={index === current ? 'step' : undefined}><span className="step-number">{index < current ? '✓' : index + 1}</span><span className="step-label">{label}</span>{index < labels.length - 1 && <span className="step-connector" aria-hidden="true"><i/></span>}</li>)}</ol>;
 }
 
-export function StepContent({ step, children, className = '' }) {
+export function StepContent({ step, children, className = '', focusOnChange = true }) {
   const inner = useRef(null), previous = useRef(step);
   useLayoutEffect(() => {
     const node = inner.current;
     let animation;
     if (previous.current !== step) {
-      node.focus({ preventScroll: true }); previous.current = step;
+      if (focusOnChange) node.focus({ preventScroll: true }); previous.current = step;
       if (!matchMedia('(prefers-reduced-motion: reduce)').matches) animation = node.animate([{ opacity: .85 }, { opacity: 1 }], { duration: 120 });
     }
     return () => animation?.cancel();
-  }, [step]);
+  }, [step,focusOnChange]);
   return <div className={`step-content ${className}`}><div className="step-page" ref={inner} key={step} tabIndex={-1}>{children}</div></div>;
 }
 

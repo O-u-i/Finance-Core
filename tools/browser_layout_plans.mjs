@@ -9,6 +9,7 @@ assert(process.env.FC_UI_TEST_RUN && run.startsWith(resolve('.tmp') + sep));
 const fixture = JSON.parse(readFileSync(join(run, 'fixture.json'), 'utf8'));
 assert.equal(fixture.syntheticOnly, true);
 assert.equal(fixture.ui, 'http://localhost:5174');
+assert(process.env.AGENT_BROWSER_ARGS?.includes('--host-resolver-rules=MAP localhost [::1]'),'Pin localhost to the owned IPv6 test server before launching the browser.');
 assert(process.env.FC_AGENT_BROWSER && process.env.AGENT_BROWSER_SESSION && process.env.AGENT_BROWSER_NAMESPACE);
 const call = (...args) => {
   const result = JSON.parse(execFileSync(process.env.FC_AGENT_BROWSER, ['--json', ...args], { encoding:'utf8', timeout:45000 }));
@@ -62,13 +63,13 @@ wait("document.querySelectorAll('.branched-menu__head[aria-expanded=true]').leng
 assert.equal(evaluate("document.querySelectorAll('.line-sidebar').length"),0, 'Legacy sidebar is retired');
 for (const name of ['Immutable month close','Investment monthly review','Immutable month close','Investment monthly review']) {
   click(name);
-  const samples = evaluate(`new Promise(resolve=>{const samples=[],start=performance.now();const frame=()=>{const node=document.querySelector('.branched-menu__item[aria-current=location]');const target=document.getElementById([...document.querySelectorAll('[data-section-title]')].find(item=>item.dataset.sectionTitle===${JSON.stringify(name)})?.id);samples.push({label:node?.textContent,y:target?.getBoundingClientRect().top,scroll:scrollY});if(performance.now()-start<600)requestAnimationFrame(frame);else resolve(samples);};requestAnimationFrame(frame);})`);
+  const samples = evaluate(`new Promise(resolve=>{const samples=[],start=performance.now();const frame=()=>{const node=document.querySelector('.branched-menu__item[aria-current=location]');const target=document.getElementById([...document.querySelectorAll('[data-section-title]')].find(item=>item.dataset.sectionTitle===${JSON.stringify(name)})?.id);samples.push({label:node?.textContent,y:target?.getBoundingClientRect().top,scroll:scrollY});if(performance.now()-start<1100)requestAnimationFrame(frame);else resolve(samples);};requestAnimationFrame(frame);})`);
   assert(samples.every(sample => sample.label === name), 'Clicked branch never becomes another section');
-  assert(Math.max(...samples.map(item=>item.scroll)) - Math.min(...samples.map(item=>item.scroll)) <= 1, 'No post-click inertial/anchor drift');
-  assert(samples[0].y >= 70 && samples[0].y < 650, 'Target remains below sticky navigation and in the reading area');
+  assert(Math.abs(samples.at(-1).scroll-samples.at(-6).scroll) <= 1, 'Eased scrolling settles without drift');
+  assert(samples.at(-1).y >= 70 && samples.at(-1).y < 650, 'Target settles below sticky navigation and in the reading area');
   checks.push({branch:name,samples});
 }
-checks.push('Branch selection stays controlled; no scroll spy or animation retargets it.');
+checks.push('Branch selection stays controlled throughout eased scrolling; no scroll spy retargets it.');
 capture('branched-menu-1600');
 click('Posted journal'); settled(); wait("document.querySelector('.branched-menu__item[aria-current=location]')?.textContent==='Posted journal'");
 click('Investment monthly review'); settled(); wait("document.querySelector('.branched-menu__item[aria-current=location]')?.textContent==='Investment monthly review'");
@@ -118,7 +119,7 @@ assert(evaluate("location.hash.endsWith('/2026-03')"));
 checks.push('Partial ISO month entry stays editable without navigation; a complete month changes the scoped report.');
 navigate('#/investment/data/import');
 assert(evaluate("document.body.textContent.includes('Choose file') && document.body.textContent.includes('No file selected')"));
-assert(evaluate("[...document.querySelectorAll('input[type=file]')].every(node=>getComputedStyle(node).width==='1px')"));
+assert(evaluate("[...document.querySelectorAll('input[type=file]')].every(node=>node.hidden && node.getAttribute('aria-hidden')==='true')"));
 checks.push('Application-owned file affordances are English. The external OS file dialog is not tested or changed.');
 writeFileSync(join(run,'browser-layout-plans.json'), JSON.stringify({syntheticOnly:true,checks},null,2));
 console.log(`Passed ${checks.length} browser checks; screenshot evidence is local and synthetic.`);

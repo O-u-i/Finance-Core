@@ -21,15 +21,20 @@ function JournalRecords({ label, records = [], children }) {
 }
 
 export default function Journal({ fc }) {
+  const retained = fc.journalBuffer?.current && fc.journalBuffer.current.workspaceId === fc.workspace?.id ? fc.journalBuffer.current : null;
   const [editing, setEditing] = useState(false), [detail, setDetail] = useState(null);
-  const [editor, setEditor] = useState(() => blankDraft(fc.data));
+  const [editor, setEditor] = useState(() => retained?.editor || blankDraft(fc.data));
   const [validation, setValidation] = useState(null);
   const [validated, setValidated] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const [step, setStep] = useState(0);
-  const [saved, setSaved] = useState(false);
-  const edited = React.useRef(false);
-  const update = (next) => { edited.current = true; setEditor(next); setValidation(null); setValidated(''); setConfirmed(false); setStep(0); fc.markDirty(); };
+  const [saved, setSaved] = useState(retained?.saved || false);
+  const edited = React.useRef(!!retained);
+  const remember = (next, isSaved, unsaved) => {
+    if (fc.journalBuffer) fc.journalBuffer.current = {workspaceId:fc.workspace.id,editor:next,saved:isSaved,unsaved};
+  };
+  const resetValidation = () => { setValidation(null); setValidated(''); setConfirmed(false); setStep(0); };
+  const update = (next) => { edited.current = true; setEditor(next); remember(next,saved,true); resetValidation(); fc.markDirty('journal-editor'); };
   const set = (name, value) => update({ ...editor, [name]: value });
   const posting = (index, name, value) => update({ ...editor, postings: editor.postings.map((item, i) => i === index ? { ...item, [name]: value } : item) });
   const commodities = active(fc.data.commodities), accounts = active(fc.data.accounts);
@@ -38,10 +43,11 @@ export default function Journal({ fc }) {
   const store = async (api, wid) => {
     const exists = saved || fc.data.drafts?.some((item) => item.draft.id === editor.id);
     const result = await api.ledger(wid, `/journal-entry-drafts${exists ? '/' + pathId(editor.id) : ''}`, { method: exists ? 'PUT' : 'POST', body: editor });
-    setSaved(true); fc.clean(); return result;
+    setSaved(true); remember(editor,true,false); fc.clean('journal-editor'); return result;
   };
   const save = () => fc.run(store, 'Draft saved.');
   const validate = async () => {
+    if (!document.getElementById('journal-editor')?.reportValidity()) return;
     setStep(1);
     const result = await fc.run(async (api, wid) => {
       await store(api, wid);
@@ -56,13 +62,23 @@ export default function Journal({ fc }) {
       // Posting revalidates the saved aggregate on the backend. Do not retry automatically.
       return api.ledger(wid, `/journal-entry-drafts/${pathId(editor.id)}/post`, { method: 'POST' });
     }, 'Entry posted. It is now immutable.');
-    if (result) { fc.clean(); setStep(3); setValidation(null); setValidated(''); setConfirmed(false); setSaved(false); setEditor(blankDraft(fc.data)); }
+    if (result) { fc.clean('journal-editor'); if (fc.journalBuffer) fc.journalBuffer.current = null; edited.current = false; setStep(3); setValidation(null); setValidated(''); setConfirmed(false); setSaved(false); setEditor(blankDraft(fc.data)); }
   };
-  const openDraft = (draft) => { if (!fc.canLeave()) return; edited.current = true; setEditor(structuredClone(draft)); setSaved(true); setValidation(null); setValidated(''); setConfirmed(false); setStep(0); fc.clean(); setEditing(true); };
-  const closeEditor = () => { if (fc.canLeave()) { fc.clean(); setEditing(false); } };
+  const openDraft = (draft) => {
+    if (!fc.canLeave() || (retained?.unsaved && retained.editor.id !== draft.id && !confirm('Discard the retained editor changes and open this saved draft?'))) return;
+    const next = structuredClone(draft); edited.current = true; setEditor(next); setSaved(true); remember(next,true,false); resetValidation(); fc.clean('journal-editor'); setEditing(true);
+  };
+  const closeEditor = () => { if (!fc.busy) { resetValidation(); fc.clean('journal-editor'); setEditing(false); } };
+  const discardEditor = () => {
+    if (fc.busy || (edited.current && !confirm(saved ? 'Discard editor changes? The saved draft remains in Unposted drafts.' : 'Discard this unfinished draft? This cannot be undone.'))) return;
+    if (fc.journalBuffer) fc.journalBuffer.current = null;
+    edited.current = false; setEditor(blankDraft(fc.data)); setSaved(false); resetValidation(); fc.clean('journal-editor'); setEditing(false);
+  };
   return <>
-    <div className="journal-tools actions"><Button primary disabled={fc.busy || fc.readonly} onClick={() => { if (fc.canLeave()) { setEditor(blankDraft(fc.data)); setSaved(false); setValidation(null); setValidated(''); setConfirmed(false); setStep(0); fc.clean(); setEditing(true); } }}>New draft</Button>{!fc.migrationRequired && <Button disabled={fc.busy} onClick={() => fc.navigate('master', 'opening', 'investment')}>Opening balances</Button>}<Button disabled={fc.busy} onClick={() => fc.navigate('data', 'import')}>Import CSV / JSON</Button><Button disabled={fc.busy} onClick={() => fc.navigate('data', 'backup')}>Export records</Button><Button disabled={fc.busy} onClick={() => fc.navigate('taccounts')}>View T-accounts</Button></div>
-    {editing && <Dialog title="Journal draft" dismissible={!fc.busy} onClose={closeEditor}>
+    <div className="journal-tools actions"><Button primary disabled={fc.busy || fc.readonly} onClick={() => { if (fc.canLeave()) { resetValidation(); setEditing(true); } }}>{retained ? 'Resume draft' : 'New draft'}</Button>{!fc.migrationRequired && <Button disabled={fc.busy} onClick={() => fc.navigate('master', 'opening', 'investment')}>Opening balances</Button>}<Button disabled={fc.busy} onClick={() => fc.navigate('data', 'import')}>Import CSV / JSON</Button><Button disabled={fc.busy} onClick={() => fc.navigate('data', 'backup')}>Export records</Button><Button disabled={fc.busy} onClick={() => fc.navigate('taccounts')}>View T-accounts</Button></div>
+    {retained && !editing && <p className="draft-retained" role="status">Editor retained for this Workspace in this session. Resume to continue or discard it. Reloading, switching Workspace or signing out clears unsaved input.</p>}
+    {editing && <Dialog title="Journal draft" dismissible={!fc.busy} onClose={closeEditor} actions={<Button type="button" danger disabled={fc.busy} onClick={discardEditor}>{saved ? 'Discard changes' : 'Discard draft'}</Button>}>
+    <p className="draft-retained">Close keeps your input in this session. Save draft stores it in this Vault. Posting still requires a fresh validation and your confirmation.</p>
     <Steps labels={['Edit draft', 'Validate', 'Confirm', 'Posted']} current={step}/>
       <form id="journal-editor" onSubmit={(event) => { event.preventDefault(); save(); }}>
         <fieldset disabled={fc.busy || fc.readonly}>
@@ -105,7 +121,14 @@ export default function Journal({ fc }) {
       </form>
     </Dialog>}
     <Panel title="Unposted drafts">
-      <JournalRecords label="Unposted drafts" records={fc.data.drafts?.map(item => item.draft)}>{draft => <RecordRow key={draft.id} title={draft.description} meta={<>{draft.date} · {draft.balancingCommodityCode} <Help label="Postings">{`${draft.postings.length} postings. Not included in the posted ledger.`}</Help></>} status={<Status state="warning">Draft</Status>} actions={<><Button disabled={fc.busy} onClick={() => openDraft(draft)}>Review</Button><Button danger disabled={fc.busy || fc.readonly} onClick={() => { if (confirm('Delete this unposted draft?')) fc.ledger(`/journal-entry-drafts/${pathId(draft.id)}`, { method: 'DELETE' }, 'Draft deleted.'); }}>Delete</Button></>}/>}</JournalRecords>
+      <JournalRecords label="Unposted drafts" records={fc.data.drafts?.map(item => item.draft)}>{draft => <RecordRow key={draft.id} title={draft.description} meta={<>{draft.date} · {draft.balancingCommodityCode} <Help label="Postings">{`${draft.postings.length} postings. Not included in the posted ledger.`}</Help></>} status={<Status state="warning">Draft</Status>} actions={<><Button disabled={fc.busy} onClick={() => openDraft(draft)}>Review</Button><Button danger disabled={fc.busy || fc.readonly} onClick={async () => {
+        if (!confirm('Delete this unposted draft and its retained editor, if any?')) return;
+        if (await fc.ledger(`/journal-entry-drafts/${pathId(draft.id)}`, { method: 'DELETE' }, 'Draft deleted.')) {
+          if (fc.journalBuffer?.current?.editor.id === draft.id) {
+            fc.journalBuffer.current = null; edited.current = false; setEditor(blankDraft(fc.data)); setSaved(false); resetValidation(); fc.clean('journal-editor');
+          }
+        }
+      }}>Delete</Button></>}/>}</JournalRecords>
     </Panel>
     <Panel title="Posted journal">
       <JournalRecords label="Posted journal" records={fc.data.entries}>{entry => <RecordRow key={entry.id} title={entry.description} meta={<>{entry.date} · {entry.balancingCommodityCode} · Immutable</>} status={<Status state={entry.reversalOf ? 'warning' : 'success'}>{entry.reversalOf ? 'Linked reversal' : 'Posted'}</Status>} actions={<><Button disabled={fc.busy} onClick={() => setDetail(entry)}>Details</Button>{!entry.reversalOf && <Button danger disabled={fc.busy || fc.readonly} onClick={() => { if (confirm('Create a linked reversal? The original entry will remain.')) fc.ledger(`/journal-entries/${pathId(entry.id)}/reverse`, { method: 'POST' }, 'Linked reversal created.'); }}>Reverse</Button>}</>}/>}</JournalRecords>

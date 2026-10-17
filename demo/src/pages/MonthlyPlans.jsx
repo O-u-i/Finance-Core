@@ -52,7 +52,7 @@ export default function MonthlyPlans({ fc }) {
   const reset = () => { setEditing(null); setVersion(value => value + 1); };
   const rows = plans.filter(item => (!category || item.category === category) && (!kind || item.kind === kind)).map(item => ({ ...item, dueDate: report?.occurrences.find(value => value.planId === item.id)?.dueDate }));
   return <>
-    <Panel title={editing ? 'Edit cash-flow plan' : 'Cash-flow plans'} description="Plan expected inflows and outflows on a monthly, quarterly, semi-annual, annual or one-time schedule. A plan is not a transaction." action={editing && <Button type="button" onClick={() => { if (fc.canLeave()) { fc.discardChanges(); reset(); } }}>Cancel edit</Button>}>
+    <Panel sectionKey="plan-editor" title={editing ? 'Edit cash-flow plan' : 'Cash-flow plans'} description="Plan expected inflows and outflows on a monthly, quarterly, semi-annual, annual or one-time schedule. A plan is not a transaction." action={editing && <Button type="button" onClick={() => { if (fc.canLeave()) { fc.discardChanges(); reset(); } }}>Cancel edit</Button>}>
       <PlanForm key={`${editing?.id || 'new'}/${version}`} fc={fc} item={editing} categories={categories} onSaved={reset}/>
     </Panel>
     <Panel title="Manage plans"><MonthPicker fc={fc} value={selectedRecordedMonth(fc.route)} label="Forecast month"/>

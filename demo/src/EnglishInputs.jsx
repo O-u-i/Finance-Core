@@ -68,7 +68,7 @@ export function FileInput({ onChange, ...props }) {
     const form = input.current?.form, reset = () => setNames('');
     form?.addEventListener('reset', reset); return () => form?.removeEventListener('reset', reset);
   }, []);
-  return <div className="english-file"><input {...props} type="file" className="sr-only" ref={input} onChange={event => { setNames([...event.target.files].map(file => file.name).join(', ')); onChange?.(event); }}/>
-    <button type="button" disabled={props.disabled} onClick={() => input.current.click()}>Choose file</button><span role="status">{names || 'No file selected'}</span>
+  return <div className="english-file"><input {...props} id={undefined} hidden aria-hidden="true" tabIndex={-1} type="file" ref={input} onChange={event => { setNames([...event.target.files].map(file => file.name).join(', ')); onChange?.(event); }}/>
+    <button id={props.id} type="button" disabled={props.disabled} onClick={() => input.current.click()}>Choose file</button><span role="status">{names || 'No file selected'}</span>
   </div>;
 }

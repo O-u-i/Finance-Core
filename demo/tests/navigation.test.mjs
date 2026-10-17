@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assessSetup, selectedMonth, selectedRecordedMonth, segmentViews, configurationViews, parseRoute, routeHash, latestCompletedMonth, viewPaths } from '../src/navigation.js';
+import { assessSetup, selectedMonth, selectedRecordedMonth, segmentViews, configurationViews, pageSections, pageTabs, parseRoute, routeHash, latestCompletedMonth, viewPaths } from '../src/navigation.js';
 const workspace={id:'sandbox',status:'active'};
 const actor={actorKind:'session',status:'active'};
 const currency=code=>({code,kind:'currency',status:'active'});
@@ -68,4 +68,21 @@ test('configuration needs an authenticated session and two usable accounts for o
  assert.equal(assessSetup({...input,commodities:[currency('CNY'),currency('MYR')],accounts:[account('cash',['CNY']),account('capital',['MYR'])]}).ready,false);
  assert.equal(assessSetup({...input,commodities:[{...currency('CNY'),status:'inactive'}]}).ready,false);
  assert.equal(assessSetup({...input,workspace:{status:'archived'}}).ready,true,'archived records stay readable while mutations remain backend-blocked');
+});
+
+test('sidebar sections are stable feature destinations, not the currently mounted tab headings',()=>{
+ assert.deepEqual(pageTabs('data'),[['import','Import'],['backup','Segment export'],['recurring','Recurring drafts'],['batch','Atomic batch']]);
+ assert.equal(pageSections('data').length,4);
+ for (const view of ['positions','statements','cashflow','taccounts','balances']) assert.equal(pageSections(view).length,0,view+' has no redundant single branch');
+ assert.equal(pageSections('journal').length,2);
+ assert.equal(pageSections('monthlyreview').length,2);
+ assert.equal(pageSections('balances',true).length,2,'legacy balances retain account and snapshot destinations');
+ assert.equal(pageSections('livingdata',true).length,0,'legacy export has one section');
+ assert.deepEqual(segmentViews.living,['balances','assets','plans','livingreview','livingdata']);
+});
+
+test('a failed configuration read is not reported as ready, even with previously usable records',()=>{
+ const input={loaded:true,workspace,actor,commodities:[currency('CNY')],accounts:[account('cash',['CNY']),account('capital',['CNY'])]};
+ assert.equal(assessSetup({...input,error:true}).ready,false);
+ assert.equal(assessSetup({...input,error:true}).masterReady,false);
 });
