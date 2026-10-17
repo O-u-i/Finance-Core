@@ -235,6 +235,49 @@ class MonthlyReviewResponse(WorkspaceLedgerResponse):
     read_only: Literal[True] = Field(alias="readOnly")
 
 
+class EconomicBalance(ContractModel):
+    segment: Literal['investment', 'living']
+    currency: str
+    cash_balance: MonthlyAmount | None = Field(alias='cashBalance')
+    liability_balance: MonthlyAmount | None = Field(alias='liabilityBalance')
+    observed_dates: list[str] = Field(alias='observedDates')
+
+
+class PlannedOutflow(ContractModel):
+    due_date: str = Field(alias='dueDate')
+    currency: str
+    amount: MonthlyAmount
+    count: int = Field(ge=1)
+
+
+class EconomicCoverage(ContractModel):
+    cash_stocks: bool = Field(alias='cashStocks', strict=True)
+    liability_balances: bool = Field(alias='liabilityBalances', strict=True)
+    dated_obligations: bool = Field(alias='datedObligations', strict=True)
+    external_completeness: Literal['unknown'] = Field(alias='externalCompleteness')
+    currencies_combined: Literal[False] = Field(alias='currenciesCombined')
+    personal_availability_assessed: Literal[False] = Field(alias='personalAvailabilityAssessed')
+
+
+class EconomicEvidence(ContractModel):
+    schema_version: Literal[1] = Field(alias='schemaVersion')
+    calculation_version: Literal['economic-evidence-v1'] = Field(alias='calculationVersion')
+    as_of: str = Field(alias='asOf')
+    through: str
+    revision: str = Field(pattern=r'^[a-f0-9]{64}$')
+    balance_basis: Literal['gross-registered-accounts'] = Field(alias='balanceBasis')
+    plan_basis: Literal['planned-only-not-contractual-maturity'] = Field(alias='planBasis')
+    balances: list[EconomicBalance]
+    planned_outflows: list[PlannedOutflow] = Field(alias='plannedOutflows')
+    coverage: EconomicCoverage
+    missing_facts: list[Literal['cash_stocks', 'liability_balances', 'dated_obligations']] = Field(alias='missingFacts')
+
+
+class EconomicEvidenceResponse(WorkspaceLedgerResponse):
+    data: EconomicEvidence
+    read_only: Literal[True] = Field(alias='readOnly')
+
+
 class AccountingCsvPreviewResponse(WorkspaceLedgerResponse):
     drafts: list[JournalEntryDraft]
     read_only: Literal[True] = Field(alias="readOnly")

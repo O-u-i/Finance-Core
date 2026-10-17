@@ -28,6 +28,7 @@ from finance_core.contracts_v3 import (
     DraftMutationResponse,
     DraftSingleResponse,
     DraftValidationResponse,
+    EconomicEvidenceResponse,
     FinancialStatementListResponse,
     HoldingResponse,
     HoldingsResponse,
@@ -131,6 +132,7 @@ class LedgerContractRouter(APIRouter):
             ("/living-accounts/{account_id}/record-balance", "POST"): LivingBalanceMutationResponse,
             ("/living-snapshots", "GET"): LivingSnapshotListResponse,
             ("/monthly-plans", "GET"): MonthlyPlanListResponse,
+            ("/reports/economic-evidence", "GET"): EconomicEvidenceResponse,
             ("/monthly-plans", "POST"): MonthlyPlanMutationResponse,
             ("/monthly-plans/{plan_id}", "PUT"): MonthlyPlanMutationResponse,
             ("/monthly-plans/{plan_id}", "DELETE"): MonthlyPlanDeleteResponse,
@@ -678,6 +680,13 @@ def create_v2_router(
     @router.get("/cash-flow")
     def cash_flow(request: Request) -> dict[str, Any]:
         return {"data": repo(request).cash_flow()}
+
+    @router.get('/reports/economic-evidence')
+    def economic_evidence_report(request: Request, as_of: str = Query(alias='asOf'), through: str = Query()):
+        try:
+            return {'data': repo(request).economic_evidence(as_of, through), 'readOnly': True}
+        except ValueError as error:
+            raise translate(error) from error
 
     @router.get("/reports/monthly-review")
     def monthly_review_report(month: str, request: Request) -> dict[str, Any]:

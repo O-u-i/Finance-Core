@@ -666,6 +666,23 @@ class LedgerRepository:
         }
 
     # Derived read models -------------------------------------------------
+    def economic_evidence(self, as_of: str, through: str) -> dict[str, Any]:
+        from finance_core.economic_evidence import economic_evidence, evidence_window
+        from finance_core.schema_migration import fingerprint
+
+        first, _ = evidence_window(as_of, through)
+        if first > datetime.now(timezone(timedelta(hours=8))).date():
+            raise ValueError('Economic balances require a non-future as-of date (Asia/Shanghai).')
+        self.connection.execute('SAVEPOINT economic_evidence_read')
+        try:
+            snapshot = PersonalFinanceSnapshot(self.connection)
+            state, observations, plans = snapshot.state(as_of[:7]), snapshot.observations(), self.list_monthly_plans()
+            revision = fingerprint({'asOf': as_of, 'through': through, 'state': state,
+                                    'observations': observations, 'plans': [dump(plan) for plan in plans]})
+            return economic_evidence(state, observations, plans, as_of, through, revision)
+        finally:
+            self.connection.execute('RELEASE economic_evidence_read')
+
     def monthly_review(self, month: str) -> dict[str, Any]:
         _, start, end = month_window(month)
         if month >= datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m"):
