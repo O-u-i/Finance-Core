@@ -4,6 +4,7 @@ import AccountRegistry from './AccountRegistry.jsx';
 import { Button, Panel, ResourceForm, Table, options } from '../components.jsx';
 import Arrangements from './Arrangements.jsx';
 import OpeningBalances from './OpeningBalances.jsx';
+import DebtRepayments from './DebtRepayments.jsx';
 import { masterSections } from '../navigation.js';
 
 export default function Master({ fc }) {
@@ -35,6 +36,7 @@ export default function Master({ fc }) {
     {tab === 'accounts' && <AccountRegistry fc={fc}/> }
     {tab === 'ownership' && <Arrangements fc={fc}/>}
     {tab === 'opening' && <OpeningBalances fc={fc}/>}
+    {tab === 'repayments' && <DebtRepayments fc={fc}/>}
     {tab === 'prices' && <Panel title="Explicit prices" description="Record prices deliberately. Finance Core does not connect to live markets.">
       <ResourceForm fc={fc} initial={{ source: 'manual' }} fields={[
         ['commodityCode', 'Commodity', 'text', commodityOptions], ['quoteCommodityCode', 'Quote commodity', 'text', commodityOptions], ['price', 'Price'], ['asOf', 'As of', 'datetime-local'], ['source', 'Source'],

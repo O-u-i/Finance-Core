@@ -306,6 +306,58 @@ class FinanceIssue(PersonalModel):
     message: str
 
 
+class DebtPayment(PersonalModel):
+    due_date: ObservedDate = Field(alias='dueDate')
+    amount: Money
+
+    @field_validator('amount')
+    @classmethod
+    def positive(cls, value):
+        if Decimal(value) <= 0:
+            raise ValueError('Repayment amounts must be positive.')
+        return value
+
+
+class DebtRepaymentRequest(PersonalModel):
+    id: str = Field(min_length=1, max_length=120)
+    account_id: str = Field(alias='accountId', min_length=1, max_length=120)
+    currency: str = Field(min_length=1, max_length=30)
+    as_of: ObservedDate = Field(alias='asOf')
+    balance_revision: str = Field(alias='balanceRevision', pattern=r'^[0-9a-f]{64}$')
+    payments: list[DebtPayment] = Field(min_length=1, max_length=100)
+    source: str = Field(min_length=1, max_length=500)
+    reason: str = Field(min_length=1, max_length=500)
+    supersedes: str | None = Field(default=None, min_length=1, max_length=120)
+
+    @field_validator('source', 'reason')
+    @classmethod
+    def nonblank(cls, value):
+        if not value.strip():
+            raise ValueError('Repayments require a source and review reason.')
+        return value.strip()
+
+
+class DebtRepaymentRecord(DebtRepaymentRequest):
+    balance: Money
+    status: Literal['draft', 'confirmed']
+    revision: int = Field(ge=1, strict=True)
+    created_at: str = Field(alias='createdAt')
+    confirmed_at: str | None = Field(default=None, alias='confirmedAt')
+
+
+class DebtRepaymentConfirmation(PersonalModel):
+    expected_revision: int = Field(alias='expectedRevision', ge=1, strict=True)
+    expected_balance_revision: str = Field(alias='expectedBalanceRevision', pattern=r'^[0-9a-f]{64}$')
+    confirmed: bool = Field(strict=True)
+
+    @field_validator('confirmed')
+    @classmethod
+    def explicit_confirmation(cls, value):
+        if value is not True:
+            raise ValueError('Explicit confirmation is required.')
+        return value
+
+
 class LegacyMappingRequest(PersonalModel):
     target_account_id: str = Field(alias='targetAccountId')
     reason: str = Field(min_length=1)

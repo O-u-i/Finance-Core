@@ -23,6 +23,10 @@ class RevisionConflict(ValueError):
     pass
 
 
+class SchemaMigrationRequired(RevisionConflict):
+    pass
+
+
 def dump(model) -> dict:
     return model.model_dump(mode='json', by_alias=True, exclude_none=True)
 
@@ -84,6 +88,7 @@ class PersonalFinanceSnapshot:
             ('investment_arrangements_v3', ('payload_json',)), ('monthly_observations_v3', ('payload_json',)),
             ('legacy_living_archive_v3', ('payload_json',)), ('finance_migration_receipts_v3', ('payload_json',)),
             ('arrangement_drafts_v3', ('request_json', 'draft_json')),
+            ('debt_repayment_arrangements_v3', ('payload_json',)),
         ]:
             if table in tables:
                 for row in rows(self.connection, table):
@@ -126,7 +131,8 @@ class PersonalFinanceSnapshot:
         for table, columns in [('journal_drafts_v2', ('payload_json',)), ('recurring_entry_rules_v2', ('payload_json',)),
                                ('financial_accounts_v3', ('payload_json',)), ('non_financial_assets_v3', ('payload_json',)),
                                ('investment_arrangements_v3', ('payload_json',)), ('finance_migration_receipts_v3', ('payload_json',)),
-                               ('arrangement_drafts_v3', ('request_json', 'draft_json'))]:
+                               ('arrangement_drafts_v3', ('request_json', 'draft_json')),
+                               ('debt_repayment_arrangements_v3', ('payload_json',))]:
             if table in tables and any(references(json.loads(row[column])) for row in rows(self.connection, table) for column in columns):
                 return True
         if 'monthly_closes_v3' in tables:

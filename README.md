@@ -1,12 +1,12 @@
-# Finance Core 3.7.1
+# Finance Core 3.8.0
 
 Finance Core (FC) is a local-first finance domain and data service with a standalone desktop UI. FC owns financial rules, exact calculations, application operations, authentication and each Vault's SQLite. It runs independently of FRAG, model providers, banks, brokers and live market services.
 
-**3.7.1 is a fix release.** [Workbench fixes](docs/md/09-workbench-fixes.md) improve space usage, typography, stable page transitions, branched navigation, account readouts, English controls and cash-flow plan scheduling. API **3.7.0**, ledger schema **3**, registry schema **1** and optional reader **1.7.0 / protocol 2** retain their versions. No dependency, production migration, installation or public release is included.
+**3.8.0 adds explicit debt repayment arrangements and bounded economic evidence.** [Economic evidence and debt timing](docs/md/10-economic-evidence-and-debt-timing.md) describes the reviewed draft/confirm lifecycle, unknown historical dates and compatible schema-3 storage. API **3.8.0**, official reader **1.8.0 / protocol 2** and FRAG **1.13.2** form the new exact contract. No dependency, production migration, installation or public release is included.
 
 ## Architecture
 
-![Finance Core 3.7.1 architecture — Light, 2048px](docs/architecture/finance-core-overview/finance-core-overview-light-2048.png)
+![Finance Core 3.8.0 architecture — Light, 2048px](docs/architecture/finance-core-overview/finance-core-overview-light-2048.png)
 
 This is the only README architecture preview: **Light / 2048px**. [Editable Archify JSON](docs/architecture/finance-core-overview/finance-core-overview.archify.json) and the [checked standalone viewer](docs/architecture/finance-core-overview/finance-core-overview.html) are available for local inspection. The main in-process connections denote route-to-repository and repository-to-domain calls; HTTP, authentication, Workspace resolution and persistence boundaries are labeled explicitly.
 
@@ -43,7 +43,7 @@ npm.cmd install --offline
 uv sync --project backend --cache-dir .tmp/uv-cache
 ```
 
-Existing pinned dependencies and notices remain subject to their reviewed licenses. No new package is required for 3.7.1.
+Existing pinned dependencies and notices remain subject to their reviewed licenses. No new package is required for 3.8.0.
 
 Set a long random `FINANCE_CORE_ADMIN_TOKEN` before starting. `.env.example` documents supported variables; real values stay outside Git. `FINANCE_CORE_DATA_ROOT` optionally selects a local data root.
 
@@ -84,20 +84,20 @@ Drafts are excluded, current account roles are stated, invalid posted dates bloc
 
 CSV/JSON import creates unposted drafts, never automatic postings. Balanced-row preview groups consecutive rows only when exact debit/credit totals balance, including one-to-many postings. Parent/reference captions do not silently determine grouping; rates are never inferred. Cross-date groups reject by default. An explicitly selected first-row policy preserves every source date and memo without editing the original file. Import and posting require separate confirmations.
 
-Use full format-3 Vault backups for complete recovery. Restore validates format, schema, hash, schedules, financial history and foreign keys inside an empty target Vault. Ordinary reversible operations expose a single-use undo token, expire after ten minutes and are invalidated by later writes. Immutable observations and closes use explicit corrections, not ordinary undo. Exports and backups are private files; keep them outside Git.
+Use full format-3 Vault backups for complete recovery, or format 4 when debt arrangements exist. Full formats 3/4 require an owner session on both restore entry points, including legacy `/backup/restore`; ledger tokens cannot import owner-only Vault history. Restore validates format, schema, hash, schedules, financial history and foreign keys inside an empty target Vault. Invalid version types return 422 without changing the target. Ordinary reversible operations expose a single-use undo token, expire after ten minutes and are invalidated by later writes. Immutable observations and closes use explicit corrections, not ordinary undo. Exports and backups are private files; keep them outside Git.
 
 ## API and optional reader compatibility
 
-The public API remains rooted at `/api/v3`. The [product 3.7.1 OpenAPI artifact](docs/release/finance-core-v3.7.1-openapi.json) and [release manifest](docs/release/finance-core-v3.7.1-release.json) record the compatible API 3.7.0 contract, including optional plan schedule metadata. There is no endpoint removal, required-field change or change to existing Journal calculations. Product, API, schema and plugin versions are independent.
+The public API remains rooted at `/api/v3`. The [product 3.8.0 OpenAPI artifact](docs/release/finance-core-v3.8.0-openapi.json) and [release manifest](docs/release/finance-core-v3.8.0-release.json) record the additive API 3.8.0 contract. Existing owner-session-only financial routes remain owner-only; the scoped economic summary requires ledger:read. Debt arrangement writes require ledger:write and explicit confirmation, never create payments or Journal entries, and are not exposed by the reader.
 
-Reader **1.7.0** still pins **API 3.7.0**, requires FRAG protocol **2** and host **1.12.1 or later**, and has unchanged selected-record permissions. Its existing archive contains exactly `manifest.json`, `adapter.py` and `ui.js`. A synthetic integration test reads the current API with a scoped read-only token. Neither reader source/archive nor FRAG's installed pins are changed by this fix. See [plugin contract and verification](docs/md/02-frag-finance-core-plugin.md).
+Reader **1.8.0** pins **API 3.8.0**, protocol **2** and minimum host **1.13.2**. Its three-file official archive exposes only explicitly selected records, including exact economic evidence windows. Earlier archives are unchanged. See [plugin contract and verification](docs/md/02-frag-finance-core-plugin.md).
 
 ```text
-Cross-repo impact: NONE
+Cross-repo impact: BOTH_REQUIRED
 Contract change: ADDITIVE
-Other repo status: NOT_TOUCHED
-Required compatible version: FC product 3.7.1 / API 3.7.0 / reader 1.7.0 / protocol 2
-Reason: Optional plan schedule support and standalone UI fixes preserve existing reader routes and exact API pin.
+Other repo status: UPDATED
+Required compatible version: FC product/API 3.8.0 / reader 1.8.0 / protocol 2 / FRAG 1.13.2
+Reason: Bounded economic evidence, explicit debt timing and exact official reader synchronization.
 ```
 
 ## Verification and build output
@@ -113,7 +113,7 @@ python tools/build_frag_plugin.py --check
 
 Use a fresh repository-local pytest base directory for each run. `tools/browser_layout_plans.mjs` verifies the real UI at 1440×900, 1600×1000, 1920×1080 and 2560×1440 against an explicitly isolated synthetic server and an owned named browser session. Configure `FC_UI_API_TARGET` for that server. Never point browser tests at a personal Vault or attach to the user's browser session. Unit tests, browser measurements, image-based visual review, human acceptance and production behavior are separate claims.
 
-Production build output is **`dist/v3.7.1/`**. It contains `THIRD-PARTY-NOTICES.txt` and `REACT-BITS-LICENSE.txt`, linked from the footer. The user explicitly approved **React Bits BranchedMenu**, revision `d9085a5d6cb62a1c7512d8fa05a4f966736b575c`, under [MIT + Commons Clause](https://github.com/DavidHDev/react-bits/blob/d9085a5d6cb62a1c7512d8fa05a4f966736b575c/LICENSE.md). Copyright and permission text are retained; the components themselves must not be sold, sublicensed or redistributed separately. FC source disclosure is not required. This approval is scoped to the named component/use, not future dependencies. Hugeicons is not installed or bundled.
+Production build output is **`dist/v3.8.0/`**. It contains `THIRD-PARTY-NOTICES.txt` and `REACT-BITS-LICENSE.txt`, linked from the footer. The user explicitly approved **React Bits BranchedMenu**, revision `d9085a5d6cb62a1c7512d8fa05a4f966736b575c`, under [MIT + Commons Clause](https://github.com/DavidHDev/react-bits/blob/d9085a5d6cb62a1c7512d8fa05a4f966736b575c/LICENSE.md). Copyright and permission text are retained; the components themselves must not be sold, sublicensed or redistributed separately. FC source disclosure is not required. This approval is scoped to the named component/use, not future dependencies. Hugeicons is not installed or bundled.
 
 React 19.3.0, React DOM 19.3.0 and scheduler 0.28.0 remain pinned. Build checks verify notices and reject legacy API routes, browser storage, bundled fonts, private data and rule assets. Stable output filenames are overwritten without recursively clearing directories. FINCR logo/favicon SVGs remain original local identity assets. The approved Archify 2.17 documentation workflow retains its [MIT notice](docs/architecture/finance-core-overview/LICENSE-Archify.txt) and embedded JetBrains Mono OFL notice; documentation fonts are absent from the app bundle.
 
@@ -121,6 +121,6 @@ React 19.3.0, React DOM 19.3.0 and scheduler 0.28.0 remain pinned. Build checks 
 
 Do not commit personal finance data, databases/WAL/SHM files, credentials, original journals, private exports, screenshots or planning files. Default tests and browser evidence are synthetic. Real migration requires separate stopped-writer, backup and `REAL_DATA_MIGRATION_APPROVED` authorization. Vault deletion is recoverable quarantine of explicit files, not directory purge. Filesystem moves and SQLite are not crash-atomic; preserve backups and seek review after interruption.
 
-Reverting 3.7.1 requires no schema migration. If extended forecasts exist, preserve a format-3 backup and explicitly review/convert or remove those plans in the current UI before running an older writer that cannot interpret their schedule metadata. The existing 3.0.0 Horizon PDF remains a candidate-direction baseline, not a promise of implemented functionality.
+Existing schema-3 Vaults need no migration or history re-entry. Reads do not create the optional debt table. Once debt arrangements exist, keep a full **format-4 / schema-3** backup; format-2 export refuses to discard them. Formats 2 and 3 still restore into an eligible empty Vault. Disable the new reader/feature to roll back consumption; do not run an older writer against an extended Vault without preserving a full backup and reviewing compatibility. Missing historical maturity dates remain unknown, pending input. The 3.0.0 Horizon PDF is still a candidate-direction baseline, not implemented commitments.
 
 No commit, push, tag, production installation, real-data migration, banking/trading integration or public deployment is performed automatically.

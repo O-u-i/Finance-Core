@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "Finance Core 3.7.1 architecture",
+    "title": "Finance Core 3.8.0 architecture",
     "locale": "en",
     "quality_profile": "showcase",
     "viewBox": [
@@ -28,7 +28,7 @@
     {
       "id": "frag_plugin",
       "type": "external",
-      "label": "Official reader 1.7.0",
+      "label": "Official reader 1.8.0",
       "sublabel": "Optional / protocol 2",
       "pos": [
         60,
@@ -43,7 +43,7 @@
       "id": "api_v3",
       "type": "backend",
       "label": "Workspace HTTP API",
-      "sublabel": "/api/v3 / API 3.7.0",
+      "sublabel": "/api/v3 / API 3.8.0",
       "pos": [
         330,
         245
@@ -83,7 +83,7 @@
       "id": "domain",
       "type": "backend",
       "label": "Deterministic finance",
-      "sublabel": "Balances / plan forecasts",
+      "sublabel": "Balances / debt timing",
       "pos": [
         1140,
         90
@@ -105,7 +105,7 @@
         180,
         72
       ],
-      "sublabel": "Plan schedules / undo"
+      "sublabel": "Repayment history / backup"
     },
     {
       "id": "registry",
@@ -187,18 +187,18 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "Desktop fixes",
+      "title": "Explicit debt timing",
       "items": [
-        "Fluid layout and controlled section navigation",
-        "English inputs, account cards and record charts"
+        "Review balance, save draft, confirm exact dates",
+        "Missing historical maturity dates stay unknown"
       ]
     },
     {
       "dot": "violet",
-      "title": "Forecast boundary",
+      "title": "Evidence boundary",
       "items": [
-        "Monthly, quarterly, semi-annual or annual plans",
-        "Exact forecasts never create posted transactions"
+        "Gross stocks, plans and dated debt stay distinct",
+        "Read-only summaries never execute payments"
       ]
     },
     {
@@ -206,7 +206,7 @@
       "title": "Unchanged data ownership",
       "items": [
         "FC is the only Vault writer; schema stays 3",
-        "Reader 1.7.0 still pins API 3.7.0"
+        "Reader 1.8.0 pins API 3.8.0"
       ]
     }
   ]

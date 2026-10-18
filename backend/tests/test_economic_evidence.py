@@ -1,5 +1,9 @@
 """Bounded financial evidence through the released HTTP seam, synthetic data only."""
 import pytest
+import sqlite3
+from fastapi.testclient import TestClient
+from finance_core.app_v3 import create_app
+from test_v3 import create_workspace
 from test_v2 import client, seed, create_and_post, opening_draft
 
 
@@ -126,3 +130,23 @@ def test_stale_or_unconfirmed_living_balances_remain_missing_and_revisions_chang
         pending = api.get('/api/v2/reports/economic-evidence?asOf=2026-09-01&through=2026-09-30').json()['data']
         assert pending['coverage']['cashStocks'] is False
         assert pending['revision'] != stale['revision'] != exact['revision']
+
+
+def test_schema_two_refuses_explicitly_without_upgrade_or_financial_changes(tmp_path):
+    root = tmp_path / 'legacy-fixture'
+    app = create_app(data_root=root, admin_token='synthetic')
+    with TestClient(app) as api:
+        api.post('/api/v3/session', json={'adminToken': 'synthetic'})
+        wid = create_workspace(api)['id']
+    # Fixture preparation only. All behavior and preservation assertions use HTTP.
+    with sqlite3.connect(root / 'workspaces' / wid / 'finance-core.sqlite3') as connection:
+        connection.execute('DELETE FROM schema_migrations WHERE version=3')
+    with TestClient(app) as api:
+        api.post('/api/v3/session', json={'adminToken': 'synthetic'})
+        prefix = f'/api/v3/workspaces/{wid}'
+        before = api.get(prefix + '/backup').json()['data']['sha256']
+        response = api.get(prefix + '/reports/economic-evidence?asOf=2026-08-31&through=2026-09-30')
+        assert response.status_code == 409
+        assert response.json()['error']['code'] == 'SCHEMA_MIGRATION_REQUIRED'
+        assert api.get(prefix + '/health').json()['ledgerSchemaVersion'] == 2
+        assert api.get(prefix + '/backup').json()['data']['sha256'] == before

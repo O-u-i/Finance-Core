@@ -5,6 +5,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 from finance_core.personal_finance_snapshot import PersonalFinanceSnapshot
+from finance_core.debt_repayments import TABLE, create_table, table_exists, validate_history
 from finance_core.schema_migration import (
     FINANCE_TABLES, V2_TABLES, archive_living, fingerprint, register_ledger_accounts, rows, schema_version,
 )
@@ -15,14 +16,19 @@ def create_backup(connection: sqlite3.Connection, *, format_version: int = 2) ->
         if schema_version(connection) != 3:
             raise ValueError('Full Vault backup requires schema 3.')
         tables = FINANCE_TABLES
+        if table_exists(connection):
+            # Old readers must refuse rather than silently discard the extension.
+            format_version, tables = 4, FINANCE_TABLES + [TABLE]
     elif format_version == 2:
+        if table_exists(connection) and connection.execute(f'SELECT 1 FROM {TABLE} LIMIT 1').fetchone():
+            raise ValueError('Debt arrangements require a full Vault backup (format 4); legacy export would lose reviewed timing.')
         if connection.execute("SELECT 1 FROM app_metadata WHERE key LIKE 'plan-repeat-months:%' LIMIT 1").fetchone():
             raise ValueError('Periodic plans require a full Vault backup (format 3); legacy format 2 would lose their schedules.')
         tables = V2_TABLES
     else:
         raise ValueError('Unsupported backup format.')
     payload = {table: rows(connection, table) for table in tables}
-    return {'formatVersion': format_version, 'schemaVersion': format_version,
+    return {'formatVersion': format_version, 'schemaVersion': 3 if format_version == 4 else format_version,
             'createdAt': datetime.now(timezone.utc).isoformat(), 'payload': payload,
             'sha256': fingerprint(payload)}
 
@@ -32,25 +38,27 @@ def restore_backup(connection: sqlite3.Connection, backup: dict) -> dict[str, in
     if not connection.in_transaction:
         raise RuntimeError('Restore requires the repository writer transaction.')
     version = backup.get('formatVersion')
-    if version not in {2, 3} or backup.get('schemaVersion') != version:
-        raise ValueError('Backup format and schema must both be 2 (legacy) or 3.')
+    if type(version) is not int or version not in {2, 3, 4} or type(backup.get('schemaVersion')) is not int or backup['schemaVersion'] != (3 if version == 4 else version):
+        raise ValueError('Backup must use format/schema 2/2, 3/3, or 4/3 (debt timing extension).')
     payload = backup.get('payload')
     if not isinstance(payload, dict):
         raise ValueError('Backup payload is missing.')
     if fingerprint(payload) != backup.get('sha256'):
         raise ValueError('Backup SHA-256 does not match its canonical payload.')
     current_schema = schema_version(connection)
-    if version == 3 and current_schema != 3:
-        raise ValueError('Restore a format 3 backup into a new schema 3 Vault.')
-    insert_order = FINANCE_TABLES if version == 3 else V2_TABLES
+    if version in {3, 4} and current_schema != 3:
+        raise ValueError('Restore a full backup into a new schema 3 Vault.')
+    insert_order = FINANCE_TABLES + ([TABLE] if version == 4 else []) if version in {3, 4} else V2_TABLES
     if set(payload) != set(insert_order):
         raise ValueError('Backup contains missing or unknown tables.')
-    empty_tables = FINANCE_TABLES if current_schema == 3 else insert_order
+    empty_tables = (FINANCE_TABLES + ([TABLE] if table_exists(connection) else [])) if current_schema == 3 else insert_order
     if any(connection.execute(f'SELECT 1 FROM {table} LIMIT 1').fetchone()
            for table in empty_tables if table != 'finance_migration_receipts_v3'):
         raise ValueError('Backup restore requires an empty financial Vault, including all segments.')
-    if version == 3:
+    if version in {3, 4}:
         connection.execute('DELETE FROM finance_migration_receipts_v3')
+    if version == 4:
+        create_table(connection)
     counts = {}
     for table in insert_order:
         columns = [row[1] for row in connection.execute(f'PRAGMA table_info({table})')]
@@ -69,6 +77,7 @@ def restore_backup(connection: sqlite3.Connection, backup: dict) -> dict[str, in
     if version == 2 and current_schema == 3:
         register_ledger_accounts(connection)
         archive_living(connection)
-    elif version == 3:
+    elif version in {3, 4}:
         PersonalFinanceSnapshot(connection).validate_restored_state()
+        validate_history(connection)
     return counts

@@ -3,7 +3,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   optimizeDeps: { entries: ['index.html'] },
   build: {
-    outDir: 'dist/v3.7.1',
+    outDir: 'dist/v3.8.0',
     emptyOutDir: false,
     modulePreload: false,
     rollupOptions: {

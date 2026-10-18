@@ -84,7 +84,7 @@ def configured(monkeypatch: pytest.MonkeyPatch, *, records: dict | None = None) 
     monkeypatch.setenv("FINANCE_CORE_PLUGIN_RECORDS_JSON", json.dumps(records or {WORKSPACE: [ENTRY, DRAFT]}))
 
 
-def fake_fc(monkeypatch: pytest.MonkeyPatch, *, version: str = "3.7.0", available: bool = True, report: dict | None = None):
+def fake_fc(monkeypatch: pytest.MonkeyPatch, *, version: str = "3.8.0", available: bool = True, report: dict | None = None):
     seen: list[str] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -104,6 +104,9 @@ def fake_fc(monkeypatch: pytest.MonkeyPatch, *, version: str = "3.7.0", availabl
         if path == f"/api/v3/workspaces/{WORKSPACE}/reports/monthly-review":
             assert request.url.params["month"] == "2025-03"
             return httpx.Response(200, json={"workspaceId": WORKSPACE, "readOnly": True, "data": report})
+        if path == f'/api/v3/workspaces/{WORKSPACE}/reports/economic-evidence':
+            assert dict(request.url.params) == {'asOf': '2026-08-31', 'through': '2026-09-30'}
+            return httpx.Response(200, json={'workspaceId': WORKSPACE, 'readOnly': True, 'data': report})
         if path == f"/api/v3/workspaces/{WORKSPACE}/dashboard":
             return httpx.Response(200, json={"workspaceId": WORKSPACE, "data": {
                 "entryCount": 1, "draftCount": 1, "openLotCount": 0,
@@ -141,11 +144,11 @@ def test_archive_integrity_and_exact_contract():
         manifest = json.loads(package.read("manifest.json"))
         assert manifest == expected_manifest()
         assert manifest["protocolVersion"] == 2
-        assert manifest["version"] == "1.7.0"
-        assert manifest["minHostVersion"] == "1.12.1"
+        assert manifest["version"] == "1.8.0"
+        assert manifest["minHostVersion"] == "1.13.2"
         assert manifest["name"] == "Finance Core"
         assert manifest["capabilities"] == ["evidence.read"]
-        assert manifest["fcApiVersion"] == "3.7.0"
+        assert manifest["fcApiVersion"] == "3.8.0"
     assert "synthetic-read-token" not in (SOURCE / "ui.js").read_text(encoding="utf-8")
     assert "FINANCE_CORE_PLUGIN_READ_TOKEN" not in (SOURCE / "ui.js").read_text(encoding="utf-8")
 
@@ -354,3 +357,78 @@ def test_protocol2_reads_the_actual_released_api_with_a_read_only_token(monkeypa
         assert "12.34" in result["records"][0]["text"]
         assert token not in json.dumps(result)
         assert set(seen) == {"/api/v3/health", "/api/v3/workspaces", prefix + "/journal-entry-drafts/plugin-draft"}
+
+
+def test_economic_record_uses_only_exact_whitelisted_gets_and_preserves_full_summary(monkeypatch, tmp_path):
+    from finance_core.app_v3 import create_app
+    record_id = 'economic-evidence:2026-08-31:2026-09-30'
+    with TestClient(create_app(data_root=tmp_path / 'economic', admin_token='synthetic')) as api:
+        api.post('/api/v3/session', json={'adminToken': 'synthetic'})
+        wid = api.post('/api/v3/workspaces', json={'displayName': 'Synthetic economics', 'kind': 'sandbox'}).json()['data']['id']
+        prefix = '/api/v3/workspaces/' + wid
+        assert api.post(prefix + '/demo/load-synthetic?profile=economic-evidence&asOf=2026-08-31').status_code == 201
+        token = api.post('/api/v3/access-tokens', json={'name': 'Synthetic official reader', 'workspaceIds': [wid], 'scopes': ['ledger:read']}).json()['token']
+        api.cookies.clear()
+        configured(monkeypatch, records={wid: [record_id]})
+        monkeypatch.setenv('FINANCE_CORE_PLUGIN_READ_TOKEN', token)
+        seen = []
+        def handle(request):
+            assert request.method == 'GET'
+            seen.append(str(request.url))
+            return api.get(request.url.raw_path.decode(), headers={'Authorization': request.headers['authorization']})
+        monkeypatch.setattr(adapter, '_client', lambda base, secret: httpx.Client(base_url=base,
+            headers={'Authorization': 'Bearer ' + secret}, transport=httpx.MockTransport(handle)))
+        assert adapter.list_scopes(wid)['scopes'][0]['records'][0]['id'] == record_id
+        assert not any('/reports/' in path for path in seen)
+        evidence = adapter.read_evidence(wid, [record_id])[0]
+        report = json.loads(evidence['text'].split('\n', 1)[1])
+        assert report['missingFacts'] == [] and evidence['revision'] == report['revision']
+        assert report['debtRepayments'][0]['amount'] == '200'
+        assert report['debtOutsideHorizon'][0]['amount'] == '1000'
+        assert report['coverage']['externalCompleteness'] == 'unknown'
+        assert 'synthetic-owner' not in evidence['text'] and token not in evidence['text']
+        seen.clear()
+        with pytest.raises(ValueError):
+            adapter.read_evidence(wid, ['economic-evidence:2026-08-31:2026-10-01'])
+        assert seen == []
+
+
+def economic_fixture():
+    return {'schemaVersion': 1, 'calculationVersion': 'economic-evidence-v1', 'asOf': '2026-08-31', 'through': '2026-09-30',
+        'revision': 'a' * 64, 'balanceBasis': 'gross-registered-accounts', 'planBasis': 'planned-only-not-contractual-maturity',
+        'debtBasis': 'confirmed-current-balance-only-future-charges-unknown',
+        'balances': [{'segment': 'investment', 'currency': 'CNY', 'cashBalance': '1500', 'liabilityBalance': '200', 'observedDates': ['2026-08-31']}],
+        'plannedOutflows': [], 'debtRepayments': [{'dueDate': '2026-09-15', 'currency': 'CNY', 'amount': '200', 'count': 1}],
+        'debtOutsideHorizon': [], 'coverage': {'cashStocks': True, 'liabilityBalances': True, 'datedObligations': True,
+            'externalCompleteness': 'unknown', 'currenciesCombined': False, 'personalAvailabilityAssessed': False}, 'missingFacts': []}
+
+
+@pytest.mark.parametrize('mutation', ['private-field','private-balance','float-money','bad-date','string-flag',
+    'hidden-gap','duplicate-group','external-complete','bad-revision','null-list','malformed-segment'])
+def test_economic_summary_refuses_private_or_inconsistent_wire_data(monkeypatch, mutation):
+    report = economic_fixture()
+    if mutation == 'private-field': report['privateNote'] = 'PRIVATE SENTINEL'
+    if mutation == 'private-balance': report['balances'][0]['accountName'] = 'PRIVATE SENTINEL'
+    if mutation == 'float-money': report['balances'][0]['cashBalance'] = 1500.0
+    if mutation == 'bad-date': report['debtRepayments'][0]['dueDate'] = '2026-02-30'
+    if mutation == 'string-flag': report['coverage']['datedObligations'] = 'true'
+    if mutation == 'hidden-gap': report['coverage']['datedObligations'] = False
+    if mutation == 'duplicate-group': report['balances'].append(deepcopy(report['balances'][0]))
+    if mutation == 'external-complete': report['coverage']['externalCompleteness'] = 'complete'
+    if mutation == 'bad-revision': report['revision'] = 'PRIVATE SENTINEL'
+    if mutation == 'null-list': report['plannedOutflows'] = None
+    if mutation == 'malformed-segment': report['balances'][0]['segment'] = []
+    configured(monkeypatch, records={WORKSPACE: ['economic-evidence:2026-08-31:2026-09-30']})
+    fake_fc(monkeypatch, report=report)
+    with pytest.raises(adapter.FcUnavailable, match='invalid economic summary'):
+        adapter.read_evidence(WORKSPACE, ['economic-evidence:2026-08-31:2026-09-30'])
+
+
+@pytest.mark.parametrize('record', ['economic-evidence:2026-02-30:2026-03-30', 'economic-evidence:2026-08-31:2026-08-31',
+    'economic-evidence:2026-08-31:2028-09-30', 'economic-evidence:*:*'])
+def test_invalid_economic_window_never_sends_http(monkeypatch, record):
+    configured(monkeypatch, records={WORKSPACE: [record]})
+    seen = fake_fc(monkeypatch)
+    with pytest.raises((ValueError, adapter.FcUnavailable)):
+        adapter.read_evidence(WORKSPACE, [record])
+    assert seen == []

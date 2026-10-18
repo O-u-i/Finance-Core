@@ -7,7 +7,7 @@ import json
 import sqlite3
 from datetime import date
 from functools import wraps
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
@@ -29,6 +29,9 @@ from finance_core.contracts_v3 import (
     DraftSingleResponse,
     DraftValidationResponse,
     EconomicEvidenceResponse,
+    DebtBalanceResponse,
+    DebtRepaymentListResponse,
+    DebtRepaymentResponse,
     FinancialStatementListResponse,
     HoldingResponse,
     HoldingsResponse,
@@ -62,7 +65,10 @@ from finance_core.contracts_v3 import (
 from finance_core.ledger_repository import LedgerRepository, dump
 from finance_core.accounting_csv import AccountingRowsRequest, balanced_drafts
 from finance_core.schema_migration import schema_version
+from finance_core.personal_finance_snapshot import RevisionConflict, SchemaMigrationRequired
 from finance_core.models import UndoRequest
+from finance_core.debt_repayments import DebtRepayments
+from finance_core.models_personal import DebtRepaymentRequest, DebtRepaymentConfirmation
 from finance_core.models_v2 import (
     Account,
     Commodity,
@@ -82,6 +88,10 @@ def repo(request: Request) -> LedgerRepository:
 
 
 def translate(error: Exception) -> HTTPException:
+    if isinstance(error, SchemaMigrationRequired):
+        return HTTPException(409, detail={'code': 'SCHEMA_MIGRATION_REQUIRED', 'message': 'Schema 3 requires an explicit reviewed migration into a new Vault copy; history need not be re-entered.'})
+    if isinstance(error, RevisionConflict):
+        return HTTPException(409, detail={'code': 'REVISION_CONFLICT', 'message': 'The reviewed financial basis changed. Refresh and confirm again.'})
     if isinstance(error, ValidationError):
         return HTTPException(422, detail={
             "code": "INVALID_REQUEST", "message": "Request does not match the Finance Core API contract."
@@ -133,6 +143,11 @@ class LedgerContractRouter(APIRouter):
             ("/living-snapshots", "GET"): LivingSnapshotListResponse,
             ("/monthly-plans", "GET"): MonthlyPlanListResponse,
             ("/reports/economic-evidence", "GET"): EconomicEvidenceResponse,
+            ('/debt-repayment-balance', 'GET'): DebtBalanceResponse,
+            ('/debt-repayment-arrangements', 'GET'): DebtRepaymentListResponse,
+            ('/debt-repayment-arrangements', 'POST'): DebtRepaymentResponse,
+            ('/debt-repayment-arrangements/{arrangement_id}', 'GET'): DebtRepaymentResponse,
+            ('/debt-repayment-arrangements/{arrangement_id}/confirm', 'POST'): DebtRepaymentResponse,
             ("/monthly-plans", "POST"): MonthlyPlanMutationResponse,
             ("/monthly-plans/{plan_id}", "PUT"): MonthlyPlanMutationResponse,
             ("/monthly-plans/{plan_id}", "DELETE"): MonthlyPlanDeleteResponse,
@@ -605,8 +620,11 @@ def create_v2_router(
         except ValueError as error:
             raise HTTPException(409, detail={'code': 'FULL_VAULT_BACKUP_REQUIRED', 'message': str(error)}) from error
 
-    @router.post("/backup/restore", status_code=201)
+    @router.post("/backup/restore", status_code=201, openapi_extra={'x-fc-owner-required-backup-formats': [3, 4]})
     def restore_backup(request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        # The legacy consumer endpoint must not bypass the full-Vault owner gate.
+        if payload.get('formatVersion') in (3, 4) and not getattr(getattr(request.state, 'actor', None), 'is_admin', False):
+            raise HTTPException(403, detail={'code': 'TOKEN_SCOPE_DENIED', 'message': 'Full Vault restore requires an owner session.'})
         try:
             return {"restored": repo(request).restore_backup(payload)}
         except Exception as error:
@@ -688,6 +706,44 @@ def create_v2_router(
         except ValueError as error:
             raise translate(error) from error
 
+    @router.get('/debt-repayment-balance')
+    def debt_repayment_balance(request: Request, account_id: str = Query(alias='accountId'), currency: str = Query(), as_of: str = Query(alias='asOf')):
+        try:
+            return {'data': DebtRepayments(repo(request)).quote(account_id, currency, as_of), 'readOnly': True}
+        except Exception as error:
+            raise translate(error) from error
+
+    @router.get('/debt-repayment-arrangements')
+    def debt_repayment_arrangements(request: Request):
+        try:
+            return {'data': DebtRepayments(repo(request)).list()}
+        except Exception as error:
+            raise translate(error) from error
+
+    @router.post('/debt-repayment-arrangements', status_code=201)
+    def create_debt_repayment(request: Request, payload: DebtRepaymentRequest):
+        try:
+            return {'data': DebtRepayments(repo(request)).create(payload)}
+        except Exception as error:
+            raise translate(error) from error
+
+    @router.get('/debt-repayment-arrangements/{arrangement_id}')
+    def get_debt_repayment(arrangement_id: str, request: Request):
+        try:
+            value = next((item for item in DebtRepayments(repo(request)).list() if item['id'] == arrangement_id), None)
+            if value is None:
+                raise LookupError('Debt arrangement was not found.')
+            return {'data': value}
+        except Exception as error:
+            raise translate(error) from error
+
+    @router.post('/debt-repayment-arrangements/{arrangement_id}/confirm')
+    def confirm_debt_repayment(arrangement_id: str, request: Request, payload: DebtRepaymentConfirmation):
+        try:
+            return {'data': DebtRepayments(repo(request)).confirm(arrangement_id, payload)}
+        except Exception as error:
+            raise translate(error) from error
+
     @router.get("/reports/monthly-review")
     def monthly_review_report(month: str, request: Request) -> dict[str, Any]:
         try:
@@ -704,11 +760,23 @@ def create_v2_router(
         return {"data": repo(request).world()}
 
     @router.post("/demo/load-synthetic", status_code=201)
-    def load_synthetic(request: Request) -> dict[str, Any]:
+    def load_synthetic(request: Request, profile: Literal['economic-evidence'] | None = None, as_of: str | None = Query(default=None, alias='asOf')) -> dict[str, Any]:
         workspace = getattr(request.state, "workspace", None)
         if workspace is not None and workspace["kind"] != "sandbox":
             raise HTTPException(403, detail="Synthetic data can only be loaded into a sandbox workspace.")
         ledger = repo(request)
+        if profile is not None:
+            if as_of is None:
+                raise HTTPException(422, detail='Select an explicit asOf date for the synthetic profile.')
+            from finance_core.synthetic_economics import load_economic_demo
+            try:
+                return load_economic_demo(ledger, as_of)
+            except ValueError as error:
+                if 'empty financial Vault' in str(error):
+                    raise HTTPException(409, detail='Synthetic profiles require an entirely empty sandbox Vault.') from error
+                raise translate(error) from error
+        if as_of is not None:
+            raise HTTPException(422, detail='asOf requires the explicit economic-evidence profile.')
         if ledger.list_commodities() or ledger.list_accounts():
             raise HTTPException(409, detail="Synthetic demo data can only be loaded into an empty v2 ledger.")
         try:

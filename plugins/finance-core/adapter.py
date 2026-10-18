@@ -1,4 +1,4 @@
-"""Optional FRAG protocol 2 adapter for Finance Core API 3.7.0.
+"""Optional FRAG protocol 2 adapter for Finance Core API 3.8.0.
 
 The legacy read hook remains available. FRAG loads this module; FC does not.
 """
@@ -9,14 +9,15 @@ import hashlib
 import json
 import os
 import re
+from datetime import date
 from urllib.parse import quote, urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
 PREFIX = "/api/plugins/finance-core"
-API_VERSION = "3.7.0"
-RECORD_ID = re.compile(r"^(?:(entry|draft):([A-Za-z0-9][A-Za-z0-9._-]{0,127})|monthly-review:([0-9]{4}-(?:0[1-9]|1[0-2])))$")
+API_VERSION = "3.8.0"
+RECORD_ID = re.compile(r"^(?:(entry|draft):([A-Za-z0-9][A-Za-z0-9._-]{0,127})|monthly-review:([0-9]{4}-(?:0[1-9]|1[0-2]))|economic-evidence:([0-9]{4}-[0-9]{2}-[0-9]{2}):([0-9]{4}-[0-9]{2}-[0-9]{2}))$")
 WORKSPACE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 MAX_RECORDS = 10
 
@@ -27,6 +28,17 @@ class FcUnavailable(Exception):
 
 class FcIncompatible(Exception):
     pass
+
+
+def _valid_record_id(value: object) -> bool:
+    if not isinstance(value, str) or not (match := RECORD_ID.fullmatch(value)):
+        return False
+    if match[4] is not None:
+        try:
+            return 0 < (date.fromisoformat(match[5]) - date.fromisoformat(match[4])).days <= 366
+        except ValueError:
+            return False
+    return True
 
 
 def _loopback_url(value: str) -> str:
@@ -62,7 +74,7 @@ def _settings() -> tuple[str, str, str, dict[str, list[str]]]:
         if len(ids) != len(set(item for item in ids if isinstance(item, str))):
             raise FcUnavailable("Finance Core selection configuration is invalid.")
         total += len(ids)
-        if any(not isinstance(item, str) or not RECORD_ID.fullmatch(item) for item in ids):
+        if any(not _valid_record_id(item) for item in ids):
             raise FcUnavailable("Finance Core selection configuration is invalid.")
     if total > MAX_RECORDS:
         raise FcUnavailable("Finance Core selection configuration exceeds ten records.")
@@ -92,7 +104,7 @@ def _check_health(client: httpx.Client) -> None:
     health = _get(client, "/api/v3/health")
     if (health.get("status") != "ok" or health.get("service") != "finance-core"
             or health.get("apiVersion") != API_VERSION):
-        raise FcIncompatible("Finance Core API 3.7.0 is required.")
+        raise FcIncompatible("Finance Core API 3.8.0 is required.")
 
 
 def _workspaces(client: httpx.Client) -> dict[str, dict]:
@@ -162,11 +174,72 @@ def _monthly_report(data: object, month: str) -> dict:
     return data
 
 
+def _economic_report(data: object, as_of: str, through: str) -> dict:
+    """Summary-only wire validation, never financial recomputation or owner reads."""
+    def require(condition):
+        if not condition:
+            raise FcUnavailable('Finance Core returned an invalid economic summary.')
+    def shape(value, fields):
+        require(isinstance(value, dict) and set(value) == set(fields.split()))
+    def day(value):
+        try:
+            return isinstance(value, str) and date.fromisoformat(value).isoformat() == value
+        except ValueError:
+            return False
+    def amount(value):
+        return isinstance(value, str) and len(value) <= 128 and re.fullmatch(r'-?(0|[1-9][0-9]*)(\.[0-9]+)?', value) is not None
+    def currency(value):
+        return isinstance(value, str) and re.fullmatch(r'[A-Z0-9][A-Z0-9._-]{0,23}', value) is not None
+    shape(data, 'schemaVersion calculationVersion asOf through revision balanceBasis planBasis balances plannedOutflows debtBasis debtRepayments debtOutsideHorizon coverage missingFacts')
+    require(type(data['schemaVersion']) is int and data['schemaVersion'] == 1
+            and data['calculationVersion'] == 'economic-evidence-v1' and data['asOf'] == as_of and data['through'] == through
+            and isinstance(data['revision'], str) and re.fullmatch(r'[a-f0-9]{64}', data['revision']) is not None
+            and data['balanceBasis'] == 'gross-registered-accounts' and data['planBasis'] == 'planned-only-not-contractual-maturity'
+            and data['debtBasis'] == 'confirmed-current-balance-only-future-charges-unknown')
+    coverage = data['coverage']
+    shape(coverage, 'cashStocks liabilityBalances datedObligations externalCompleteness currenciesCombined personalAvailabilityAssessed')
+    require(all(type(coverage[key]) is bool for key in ('cashStocks','liabilityBalances','datedObligations'))
+            and coverage['externalCompleteness'] == 'unknown' and coverage['currenciesCombined'] is False
+            and coverage['personalAvailabilityAssessed'] is False)
+    require(data['missingFacts'] == [fact for fact, key in [('cash_stocks','cashStocks'), ('liability_balances','liabilityBalances'), ('dated_obligations','datedObligations')] if not coverage[key]])
+    require(isinstance(data['balances'], list))
+    groups = []
+    for value in data['balances']:
+        shape(value, 'segment currency cashBalance liabilityBalance observedDates')
+        require(isinstance(value['segment'], str) and value['segment'] in {'investment','living'} and currency(value['currency'])
+                and all(value[key] is None or amount(value[key]) for key in ('cashBalance','liabilityBalance'))
+                and isinstance(value['observedDates'], list)
+                and all(day(item) and item <= as_of for item in value['observedDates']))
+        require(value['observedDates'] == sorted(set(value['observedDates'])))
+        groups.append((value['segment'], value['currency']))
+    require(groups == sorted(set(groups)))
+    for key in ('plannedOutflows', 'debtRepayments', 'debtOutsideHorizon'):
+        require(isinstance(data[key], list))
+        groups = []
+        for value in data[key]:
+            dated = key != 'debtOutsideHorizon'
+            shape(value, ('dueDate ' if dated else '') + 'currency amount count')
+            require(currency(value['currency']) and amount(value['amount']) and not value['amount'].startswith('-')
+                    and type(value['count']) is int and value['count'] >= 1)
+            if dated:
+                require(day(value['dueDate']) and value['dueDate'] <= through
+                        and (key != 'plannedOutflows' or value['dueDate'] > as_of))
+            groups.append((value['dueDate'], value['currency']) if dated else value['currency'])
+        require(groups == sorted(set(groups)))
+    return data
+
+
 def _record(client: httpx.Client, workspace_id: str, record_id: str) -> dict:
     match = RECORD_ID.fullmatch(record_id)
     if match is None:
         raise ValueError("Invalid record ID.")
-    kind, raw_id, month = match.groups()
+    kind, raw_id, month, as_of, through = match.groups()
+    if as_of is not None:
+        path = f"/api/v3/workspaces/{quote(workspace_id, safe='')}/reports/economic-evidence?asOf={as_of}&through={through}"
+        payload = _get(client, path)
+        if payload.get('workspaceId') != workspace_id or payload.get('readOnly') is not True:
+            raise FcUnavailable('Finance Core returned a mismatched Workspace response.')
+        return _economic_report(payload.get('data'), as_of, through)
     if month is not None:
         path = f"/api/v3/workspaces/{quote(workspace_id, safe='')}/reports/monthly-review?month={month}"
         payload = _get(client, path)
@@ -186,6 +259,9 @@ def _record(client: httpx.Client, workspace_id: str, record_id: str) -> dict:
 
 
 def _label(record_id: str, data: dict) -> str:
+    if record_id.startswith('economic-evidence:'):
+        _, as_of, through = record_id.split(':')
+        return f'Economic evidence {as_of} through {through} (gross recorded balances; not personal affordability)'
     if record_id.startswith("monthly-review:"):
         return f"Monthly review {record_id.split(':')[1]} (three months; posted ledger only)"
     item = data if record_id.startswith("entry:") else data["draft"]
@@ -194,6 +270,9 @@ def _label(record_id: str, data: dict) -> str:
 
 
 def _evidence(record_id: str, data: dict) -> dict[str, str]:
+    if record_id.startswith('economic-evidence:'):
+        return {'recordId': record_id, 'label': _label(record_id, data), 'revision': data['revision'],
+                'text': 'Deterministic economic evidence. Gross balances; future charges and external completeness remain unknown.\n' + json.dumps(data, ensure_ascii=False, sort_keys=True, indent=2)}
     if record_id.startswith("monthly-review:"):
         # A required report is atomic: the host must reject an insufficient
         # budget, never truncate its months, warnings, currencies or coverage.
@@ -224,7 +303,7 @@ def _evidence(record_id: str, data: dict) -> dict[str, str]:
 def read_evidence(workspace_id: str, record_ids: list[str]) -> list[dict[str, str]]:
     if (not isinstance(workspace_id, str) or not WORKSPACE_ID.fullmatch(workspace_id)
             or not isinstance(record_ids, list) or not 1 <= len(record_ids) <= MAX_RECORDS
-            or any(not isinstance(item, str) or not RECORD_ID.fullmatch(item) for item in record_ids)):
+            or any(not _valid_record_id(item) for item in record_ids)):
         raise ValueError("Invalid Workspace scope or record count.")
     base, token, _ui_url, selected = _settings()
     allowed = selected.get(workspace_id)
@@ -278,7 +357,7 @@ def list_scopes(scope_id: str | None = None) -> dict:
                 if scope_id is not None:
                     raise ValueError("Invalid Workspace scope.")
                 continue
-            records = [{"id": item, "label": _label(item, {} if item.startswith("monthly-review:") else _record(client, workspace_id, item))}
+            records = [{"id": item, "label": _label(item, {} if item.startswith(("monthly-review:", 'economic-evidence:')) else _record(client, workspace_id, item))}
                        for item in ids]
             result.append({"id": workspace_id, "label": workspace.get("displayName", workspace_id),
                            "records": records})

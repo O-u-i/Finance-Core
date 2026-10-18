@@ -15,6 +15,7 @@ from finance_core.models_v2 import (
     PriceQuote,
     RecurringEntryRule,
 )
+from finance_core.models_personal import DebtRepaymentRecord, Money, ObservedDate
 
 
 class ContractModel(BaseModel):
@@ -259,6 +260,12 @@ class EconomicCoverage(ContractModel):
     personal_availability_assessed: Literal[False] = Field(alias='personalAvailabilityAssessed')
 
 
+class DebtOutsideHorizon(ContractModel):
+    currency: str
+    amount: MonthlyAmount
+    count: int = Field(ge=1)
+
+
 class EconomicEvidence(ContractModel):
     schema_version: Literal[1] = Field(alias='schemaVersion')
     calculation_version: Literal['economic-evidence-v1'] = Field(alias='calculationVersion')
@@ -269,6 +276,9 @@ class EconomicEvidence(ContractModel):
     plan_basis: Literal['planned-only-not-contractual-maturity'] = Field(alias='planBasis')
     balances: list[EconomicBalance]
     planned_outflows: list[PlannedOutflow] = Field(alias='plannedOutflows')
+    debt_basis: Literal['confirmed-current-balance-only-future-charges-unknown'] = Field(alias='debtBasis')
+    debt_repayments: list[PlannedOutflow] = Field(alias='debtRepayments')
+    debt_outside_horizon: list[DebtOutsideHorizon] = Field(alias='debtOutsideHorizon')
     coverage: EconomicCoverage
     missing_facts: list[Literal['cash_stocks', 'liability_balances', 'dated_obligations']] = Field(alias='missingFacts')
 
@@ -276,6 +286,28 @@ class EconomicEvidence(ContractModel):
 class EconomicEvidenceResponse(WorkspaceLedgerResponse):
     data: EconomicEvidence
     read_only: Literal[True] = Field(alias='readOnly')
+
+
+class DebtBalanceQuote(ContractModel):
+    account_id: str = Field(alias='accountId')
+    currency: str
+    as_of: ObservedDate = Field(alias='asOf')
+    balance_revision: str = Field(alias='balanceRevision', pattern=r'^[a-f0-9]{64}$')
+    known: bool = Field(strict=True)
+    balance: Money | None
+
+
+class DebtBalanceResponse(WorkspaceLedgerResponse):
+    data: DebtBalanceQuote
+    read_only: Literal[True] = Field(alias='readOnly')
+
+
+class DebtRepaymentListResponse(WorkspaceLedgerResponse):
+    data: list[DebtRepaymentRecord]
+
+
+class DebtRepaymentResponse(WorkspaceLedgerResponse):
+    data: DebtRepaymentRecord
 
 
 class AccountingCsvPreviewResponse(WorkspaceLedgerResponse):

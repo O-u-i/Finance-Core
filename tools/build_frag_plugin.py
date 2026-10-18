@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "plugins" / "finance-core"
-ARCHIVE = ROOT / "docs" / "release" / "finance-core-frag-plugin-v1.7.0.zip"
+ARCHIVE = ROOT / "docs" / "release" / "finance-core-frag-plugin-v1.8.0.zip"
 LEGACY_ARCHIVE = ROOT / "docs" / "release" / "finance-core-frag-plugin-v1.0.0.zip"
 NAMES = ("manifest.json", "adapter.py", "ui.js")
 
@@ -23,10 +23,10 @@ def expected_manifest() -> dict:
         "id": "finance-core",
         "name": "Finance Core",
         "protocolVersion": 2,
-        "version": "1.7.0",
-        "minHostVersion": "1.12.1",
+        "version": "1.8.0",
+        "minHostVersion": "1.13.2",
         "capabilities": ["evidence.read"],
-        "fcApiVersion": "3.7.0",
+        "fcApiVersion": "3.8.0",
         "files": {name: sha256((SOURCE / name).read_bytes()) for name in ("adapter.py", "ui.js")},
     }
 

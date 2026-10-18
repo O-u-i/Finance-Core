@@ -48,7 +48,7 @@ export function pageSections(view, legacy = false) {
 export const pageTabs = (view, legacy = false) => pageSections(view,legacy).filter(item => item.tab).map(item => [item.tab,item.tabLabel]);
 
 export function masterSections(legacy = false) {
-  return [['commodities','Commodities'],['accounts','Accounts'],['prices','Prices'], ...(!legacy ? [['opening','Opening balances'],['ownership','Ownership & agreements']] : [])];
+  return [['commodities','Commodities'],['accounts','Accounts'],['prices','Prices'], ...(!legacy ? [['opening','Opening balances'],['ownership','Ownership & agreements'],['repayments','Debt repayments']] : [])];
 }
 
 export function latestCompletedMonth(now = new Date()) {
@@ -82,7 +82,7 @@ export function viewPaths(view, tab = '', now = new Date(), segment = '', asOfMo
   if (view === 'overview') return { ...personal, entries: '/journal-entries', assets: '/non-financial-assets', observations: '/monthly-observations', personalReport: `/reports/personal-balance-sheet?month=${month}`, recordedReport: `/reports/living-recorded-balances?month=${month}` };
   if (view === 'master') return { ...views.master[1], ...personal, living: '/living-accounts', ...(tab === 'ownership' ? {
     legacyMapping: '/legacy-living-mapping', arrangements: '/investment-arrangements', personalReport: `/reports/personal-balance-sheet?month=${month}`,
-  } : {}), ...(tab === 'opening' ? { openingRecords: '/opening-balances', balanceRecords: '/balance-records' } : {}) };
+  } : {}), ...(tab === 'opening' ? { openingRecords: '/opening-balances', balanceRecords: '/balance-records' } : {}), ...(tab === 'repayments' ? { debtRepayments: '/debt-repayment-arrangements' } : {}) };
   if (view === 'balances') return { ...personal, ...recorded, observations: '/monthly-observations' };
   if (['assets','monthlyreview','livingreview','livingdata'].includes(view)) {
     const result = { ...views[view][1], ...personal, assets: '/non-financial-assets', observations: '/monthly-observations', arrangements: '/investment-arrangements', closes: '/monthly-closes' };

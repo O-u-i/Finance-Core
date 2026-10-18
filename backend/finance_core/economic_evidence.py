@@ -17,9 +17,9 @@ def evidence_window(as_of: str, through: str) -> tuple[date, date]:
     return first, last
 
 
-def economic_evidence(state: dict, observations: list[dict], plans: list, as_of: str, through: str, revision: str) -> dict:
-    first, last = evidence_window(as_of, through)
-    ledger, issues = ledger_at(state, first)
+def balance_facts(state: dict, observations: list[dict], as_of: str) -> tuple[list[dict], bool]:
+    """One balance selection for summaries and the explicit debt-review workflow."""
+    ledger, issues = ledger_at(state, date.fromisoformat(as_of))
     currencies = {value['code'] for value in state['commodities'] if value['kind'] == 'currency'}
     baseline = bool(state['settings'] and state['settings']['baselineConfirmed']
                     and state['settings']['cutoverMonth'] <= as_of[:7] and not state['unmappedLegacyLiving'])
@@ -35,26 +35,15 @@ def economic_evidence(state: dict, observations: list[dict], plans: list, as_of:
     # Retired accounts cannot hide an unsettled balance just by ending their purpose.
     living = calculate_recorded_balances(as_of[:7], [{**a, 'endMonth': None} for a in state['accounts']], dated)
     living = {value['accountId']: value for value in living['accounts']}
-    totals = defaultdict(lambda: {'cashBalance': Decimal(0), 'liabilityBalance': Decimal(0), 'observedDates': set()})
-    known = {'cashBalance': baseline and ledger_valid, 'liabilityBalance': baseline and ledger_valid}
-    unknown_groups = set()
-    cash_count = 0
-    nonzero_liability = False
+    facts = []
     for account in state['accounts']:
         if account.get('startMonth') and account['startMonth'] > as_of[:7]:
             continue
         key = 'liabilityBalance' if account['type'] == 'liability' else 'cashBalance' if account['type'] == 'asset' and account['subtype'] == 'cash' else None
         if key is None:
             continue
-        if key == 'cashBalance':
-            cash_count += 1
         for currency in account['allowedCommodityCodes']:
-            if currency not in currencies:
-                known[key] = False
-                continue
-            group = (account['segment'], currency)
-            total = totals[group]
-            valid = baseline and account['classificationConfirmed'] and ledger_valid
+            valid = baseline and account['classificationConfirmed'] and ledger_valid and currency in currencies
             if account['segment'] == 'investment':
                 amount, observed = ledger['balances'].get((account['id'], currency), Decimal(0)), as_of
             else:
@@ -62,15 +51,28 @@ def economic_evidence(state: dict, observations: list[dict], plans: list, as_of:
                 valid = valid and bool(row and row['status'] == 'confirmed' and row['observedDate'] == as_of and account.get('ownerPartyId'))
                 amount = Decimal(row['amount']) if row and row['amount'] is not None else Decimal(0)
                 observed = row['observedDate'] if row else None
-            if key == 'liabilityBalance' and amount != 0:
-                nonzero_liability = True
-            if not valid:
-                known[key] = False
-                unknown_groups.add((group, key))
-            total[key] = decimal_add(total[key], amount)
-            if observed:
-                total['observedDates'].add(observed)
-    known['cashBalance'] = known['cashBalance'] and cash_count > 0
+            facts.append({'accountId': account['id'], 'currency': currency, 'segment': account['segment'],
+                          'key': key, 'known': valid, 'amount': amount, 'observedDate': observed})
+    return facts, baseline and ledger_valid
+
+
+def economic_evidence(state: dict, observations: list[dict], plans: list, as_of: str, through: str, revision: str,
+                      repayments: list[dict] = (), balance_revision: str = '') -> dict:
+    first, last = evidence_window(as_of, through)
+    facts, baseline = balance_facts(state, observations, as_of)
+    currencies = {value['code'] for value in state['commodities'] if value['kind'] == 'currency'}
+    known = {key: baseline and all(fact['known'] for fact in facts if fact['key'] == key)
+             for key in ('cashBalance', 'liabilityBalance')}
+    known['cashBalance'] = known['cashBalance'] and any(fact['key'] == 'cashBalance' for fact in facts)
+    totals = defaultdict(lambda: {'cashBalance': Decimal(0), 'liabilityBalance': Decimal(0), 'observedDates': set()})
+    unknown_groups = set()
+    for fact in facts:
+        group, key = (fact['segment'], fact['currency']), fact['key']
+        totals[group][key] = decimal_add(totals[group][key], fact['amount'])
+        if not fact['known']:
+            unknown_groups.add((group, key))
+        if fact['observedDate']:
+            totals[group]['observedDates'].add(fact['observedDate'])
     outflows = defaultdict(lambda: {'amount': Decimal(0), 'count': 0})
     month = first.year * 12 + first.month - 1
     final_month = last.year * 12 + last.month - 1
@@ -84,9 +86,27 @@ def economic_evidence(state: dict, observations: list[dict], plans: list, as_of:
                 group['amount'] = decimal_add(group['amount'], Decimal(item['amount']))
                 group['count'] += 1
         month += 1
-    # Plans are not contractual debt maturities. Outstanding debt without such a
-    # source keeps timing unknown; a zero registered debt balance needs no maturity.
-    dated_obligations = known['liabilityBalance'] and not nonzero_liability
+    # A forecast is never a debt maturity. Only an explicit confirmed arrangement
+    # for the unchanged recorded balance can establish timing for that balance.
+    confirmed = [value for value in repayments if value['status'] == 'confirmed']
+    superseded = {value.get('supersedes') for value in confirmed}
+    active = {(value['accountId'], value['currency']): value for value in confirmed if value['id'] not in superseded}
+    dated_obligations = known['liabilityBalance']
+    debt_dates = defaultdict(lambda: {'amount': Decimal(0), 'count': 0})
+    outside = defaultdict(lambda: {'amount': Decimal(0), 'count': 0})
+    for fact in facts:
+        if fact['key'] != 'liabilityBalance' or fact['amount'] == 0:
+            continue
+        record = active.get((fact['accountId'], fact['currency']))
+        if not (fact['known'] and fact['amount'] > 0 and record and record['asOf'] == as_of
+                and record['balanceRevision'] == balance_revision and Decimal(record['balance']) == fact['amount']):
+            dated_obligations = False
+            continue
+        for payment in record['payments']:
+            day, currency = payment['dueDate'], record['currency']
+            target = debt_dates[(day, currency)] if day <= through else outside[currency]
+            target['amount'] = decimal_add(target['amount'], Decimal(payment['amount']))
+            target['count'] += 1
     coverage = {'cashStocks': known['cashBalance'], 'liabilityBalances': known['liabilityBalance'],
                 'datedObligations': dated_obligations, 'externalCompleteness': 'unknown',
                 'currenciesCombined': False, 'personalAvailabilityAssessed': False}
@@ -100,5 +120,11 @@ def economic_evidence(state: dict, observations: list[dict], plans: list, as_of:
                      for (segment, currency), value in sorted(totals.items())],
         'plannedOutflows': [{'dueDate': day, 'currency': currency, 'amount': canonical_decimal(value['amount']), 'count': value['count']}
                             for (day, currency), value in sorted(outflows.items())],
+        'debtBasis': 'confirmed-current-balance-only-future-charges-unknown',
+        # Overdue dates are retained verbatim, not shifted into the future.
+        'debtRepayments': [{'dueDate': day, 'currency': currency, 'amount': canonical_decimal(value['amount']), 'count': value['count']}
+                           for (day, currency), value in sorted(debt_dates.items())],
+        'debtOutsideHorizon': [{'currency': currency, 'amount': canonical_decimal(value['amount']), 'count': value['count']}
+                               for currency, value in sorted(outside.items())],
         'coverage': coverage, 'missingFacts': [fact for fact, flag in facts if not coverage[flag]],
     }
