@@ -37,6 +37,43 @@ def monthly_fixture():
         for index in range(12)])
 
 
+def test_month_to_date_uses_only_the_exact_whitelisted_summary_get(monkeypatch, tmp_path):
+    from test_v2 import client, create_and_post, seed
+    from test_month_to_date_review import income
+
+    record = 'month-to-date:2026-08-18'
+    with client(tmp_path) as scoped:
+        seed(scoped)
+        create_and_post(scoped, income('mtd-private', '2026-08-18', '12.34'))
+        api, wid = scoped.api, scoped.prefix.rsplit('/', 1)[1]
+        token = api.post('/api/v3/access-tokens', json={'name': 'Synthetic MTD reader',
+            'workspaceIds': [wid], 'scopes': ['ledger:read']}).json()['token']
+        api.cookies.clear()
+        configured(monkeypatch, records={wid: [record]})
+        monkeypatch.setenv('FINANCE_CORE_PLUGIN_READ_TOKEN', token)
+        seen = []
+        def handle(request):
+            assert request.method == 'GET'
+            seen.append(request.url.raw_path.decode())
+            return api.get(request.url.raw_path.decode(), headers={'Authorization': request.headers['authorization']})
+        monkeypatch.setattr(adapter, '_client', lambda base, secret: httpx.Client(base_url=base,
+            headers={'Authorization': 'Bearer ' + secret}, transport=httpx.MockTransport(handle)))
+        assert adapter.list_scopes(wid)['scopes'][0]['records'][0]['id'] == record
+        assert not any('/reports/' in path for path in seen)
+        result = adapter.read_evidence_request({'protocolVersion': 2, 'pluginId': 'finance-core', 'scopeId': wid, 'recordIds': [record]})
+        evidence = result['records'][0]
+        report = json.loads(evidence['text'].split('\n', 1)[1])
+        assert report['asOf'] == '2026-08-18' and report['periodStatus'] == 'partial'
+        assert report['period']['currencies'][0]['income'] == '12.34'
+        assert evidence['revision'] == report['revision']
+        assert 'PRIVATE' not in evidence['text'] and 'mtd-private' not in evidence['text'] and token not in evidence['text']
+        assert set(seen) == {'/api/v3/health', '/api/v3/workspaces', scoped.prefix + '/reports/month-to-date?asOf=2026-08-18'}
+        seen.clear()
+        with pytest.raises(ValueError):
+            adapter.read_evidence(wid, ['month-to-date:2026-08-17'])
+        assert seen == []
+
+
 def test_monthly_discovery_does_not_fetch_reports_and_read_is_full_and_stable(monkeypatch):
     configured(monkeypatch, records={WORKSPACE: [REPORT]})
     report = monthly_fixture()
@@ -84,7 +121,7 @@ def configured(monkeypatch: pytest.MonkeyPatch, *, records: dict | None = None) 
     monkeypatch.setenv("FINANCE_CORE_PLUGIN_RECORDS_JSON", json.dumps(records or {WORKSPACE: [ENTRY, DRAFT]}))
 
 
-def fake_fc(monkeypatch: pytest.MonkeyPatch, *, version: str = "3.8.0", available: bool = True, report: dict | None = None):
+def fake_fc(monkeypatch: pytest.MonkeyPatch, *, version: str = "3.9.0", available: bool = True, report: dict | None = None):
     seen: list[str] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -104,6 +141,9 @@ def fake_fc(monkeypatch: pytest.MonkeyPatch, *, version: str = "3.8.0", availabl
         if path == f"/api/v3/workspaces/{WORKSPACE}/reports/monthly-review":
             assert request.url.params["month"] == "2025-03"
             return httpx.Response(200, json={"workspaceId": WORKSPACE, "readOnly": True, "data": report})
+        if path == f'/api/v3/workspaces/{WORKSPACE}/reports/month-to-date':
+            assert dict(request.url.params) == {'asOf': '2026-08-18'}
+            return httpx.Response(200, json={'workspaceId': WORKSPACE, 'readOnly': True, 'data': report})
         if path == f'/api/v3/workspaces/{WORKSPACE}/reports/economic-evidence':
             assert dict(request.url.params) == {'asOf': '2026-08-31', 'through': '2026-09-30'}
             return httpx.Response(200, json={'workspaceId': WORKSPACE, 'readOnly': True, 'data': report})
@@ -144,11 +184,11 @@ def test_archive_integrity_and_exact_contract():
         manifest = json.loads(package.read("manifest.json"))
         assert manifest == expected_manifest()
         assert manifest["protocolVersion"] == 2
-        assert manifest["version"] == "1.8.0"
-        assert manifest["minHostVersion"] == "1.13.2"
+        assert manifest["version"] == "1.9.0"
+        assert manifest["minHostVersion"] == "1.13.3"
         assert manifest["name"] == "Finance Core"
         assert manifest["capabilities"] == ["evidence.read"]
-        assert manifest["fcApiVersion"] == "3.8.0"
+        assert manifest["fcApiVersion"] == "3.9.0"
     assert "synthetic-read-token" not in (SOURCE / "ui.js").read_text(encoding="utf-8")
     assert "FINANCE_CORE_PLUGIN_READ_TOKEN" not in (SOURCE / "ui.js").read_text(encoding="utf-8")
 
@@ -427,6 +467,60 @@ def test_economic_summary_refuses_private_or_inconsistent_wire_data(monkeypatch,
 @pytest.mark.parametrize('record', ['economic-evidence:2026-02-30:2026-03-30', 'economic-evidence:2026-08-31:2026-08-31',
     'economic-evidence:2026-08-31:2028-09-30', 'economic-evidence:*:*'])
 def test_invalid_economic_window_never_sends_http(monkeypatch, record):
+    configured(monkeypatch, records={WORKSPACE: [record]})
+    seen = fake_fc(monkeypatch)
+    with pytest.raises((ValueError, adapter.FcUnavailable)):
+        adapter.read_evidence(WORKSPACE, [record])
+    assert seen == []
+
+
+def month_to_date_fixture():
+    from finance_core.monthly_review import month_to_date_review
+    return month_to_date_review('2026-08-18', [{'id': 'private', 'date': '2026-08-18',
+        'balancing_commodity_code': 'CNY', 'reversal_of': None}], [
+        {'entry_id': 'private', 'type': 'asset', 'subtype': 'cash', 'side': 'debit', 'units': '1.25',
+         'valuation_amount': '1.25', 'commodity_code': f'C{index:02d}', 'cash_flow_category': 'other'}
+        for index in range(32)])
+
+
+def test_month_to_date_large_summary_is_whole_and_not_an_eight_thousand_character_excerpt(monkeypatch):
+    report = month_to_date_fixture()
+    configured(monkeypatch, records={WORKSPACE: ['month-to-date:2026-08-18']})
+    fake_fc(monkeypatch, report=report)
+    result = adapter.read_evidence(WORKSPACE, ['month-to-date:2026-08-18'])[0]
+    assert len(result['text']) > 8000
+    assert json.loads(result['text'].split('\n', 1)[1]) == report
+    assert 'private' not in result['text']
+
+
+@pytest.mark.parametrize('mutation', ['extra-field', 'private-currency', 'wrong-day', 'wrong-window',
+    'closed-period', 'external-complete', 'unrecorded-zero', 'float-money', 'bool-count',
+    'made-up-comparison', 'duplicate-currency', 'null-period', 'bad-revision', 'blocked-with-totals'])
+def test_month_to_date_wire_refuses_private_inconsistent_or_unjustified_completeness(monkeypatch, mutation):
+    report = month_to_date_fixture()
+    if mutation == 'extra-field': report['description'] = 'PRIVATE SENTINEL'
+    if mutation == 'private-currency': report['period']['currencies'][0]['accountName'] = 'PRIVATE SENTINEL'
+    if mutation == 'wrong-day': report['asOf'] = '2026-08-17'
+    if mutation == 'wrong-window': report['windowEndExclusive'] = '2026-09-01'
+    if mutation == 'closed-period': report['periodStatus'] = 'complete'
+    if mutation == 'external-complete': report['coverage']['externalCompleteness'] = 'complete'
+    if mutation == 'unrecorded-zero': report['coverage']['unrecordedDays'] = 'zero'
+    if mutation == 'float-money': report['period']['currencies'][0]['income'] = 0.0
+    if mutation == 'bool-count': report['period']['postedEntryCount'] = True
+    if mutation == 'made-up-comparison': report['period']['currencies'][0]['incomeChange'] = '0'
+    if mutation == 'duplicate-currency': report['period']['currencies'].append(deepcopy(report['period']['currencies'][0]))
+    if mutation == 'null-period': report['period'] = None
+    if mutation == 'bad-revision': report['revision'] = 'PRIVATE SENTINEL'
+    if mutation == 'blocked-with-totals': report['status'] = 'blocked'
+    configured(monkeypatch, records={WORKSPACE: ['month-to-date:2026-08-18']})
+    fake_fc(monkeypatch, report=report)
+    with pytest.raises(adapter.FcUnavailable, match='invalid month-to-date summary'):
+        adapter.read_evidence(WORKSPACE, ['month-to-date:2026-08-18'])
+
+
+@pytest.mark.parametrize('record', ['month-to-date:2026-02-29', 'month-to-date:2026-08-1',
+    'month-to-date:9999-12-31', 'month-to-date:*', 'month-to-date:2026-08-18:extra'])
+def test_invalid_month_to_date_record_never_sends_http(monkeypatch, record):
     configured(monkeypatch, records={WORKSPACE: [record]})
     seen = fake_fc(monkeypatch)
     with pytest.raises((ValueError, adapter.FcUnavailable)):

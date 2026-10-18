@@ -1,4 +1,4 @@
-"""Optional FRAG protocol 2 adapter for Finance Core API 3.8.0.
+"""Optional FRAG protocol 2 adapter for Finance Core API 3.9.0.
 
 The legacy read hook remains available. FRAG loads this module; FC does not.
 """
@@ -9,15 +9,15 @@ import hashlib
 import json
 import os
 import re
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote, urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
 PREFIX = "/api/plugins/finance-core"
-API_VERSION = "3.8.0"
-RECORD_ID = re.compile(r"^(?:(entry|draft):([A-Za-z0-9][A-Za-z0-9._-]{0,127})|monthly-review:([0-9]{4}-(?:0[1-9]|1[0-2]))|economic-evidence:([0-9]{4}-[0-9]{2}-[0-9]{2}):([0-9]{4}-[0-9]{2}-[0-9]{2}))$")
+API_VERSION = "3.9.0"
+RECORD_ID = re.compile(r"^(?:(entry|draft):([A-Za-z0-9][A-Za-z0-9._-]{0,127})|monthly-review:([0-9]{4}-(?:0[1-9]|1[0-2]))|economic-evidence:([0-9]{4}-[0-9]{2}-[0-9]{2}):([0-9]{4}-[0-9]{2}-[0-9]{2})|month-to-date:([0-9]{4}-[0-9]{2}-[0-9]{2}))$")
 WORKSPACE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 MAX_RECORDS = 10
 
@@ -36,6 +36,11 @@ def _valid_record_id(value: object) -> bool:
     if match[4] is not None:
         try:
             return 0 < (date.fromisoformat(match[5]) - date.fromisoformat(match[4])).days <= 366
+        except ValueError:
+            return False
+    if match[6] is not None:
+        try:
+            return date.fromisoformat(match[6]) <= datetime.now(timezone(timedelta(hours=8))).date()
         except ValueError:
             return False
     return True
@@ -104,7 +109,7 @@ def _check_health(client: httpx.Client) -> None:
     health = _get(client, "/api/v3/health")
     if (health.get("status") != "ok" or health.get("service") != "finance-core"
             or health.get("apiVersion") != API_VERSION):
-        raise FcIncompatible("Finance Core API 3.8.0 is required.")
+        raise FcIncompatible("Finance Core API 3.9.0 is required.")
 
 
 def _workspaces(client: httpx.Client) -> dict[str, dict]:
@@ -174,6 +179,52 @@ def _monthly_report(data: object, month: str) -> dict:
     return data
 
 
+def _month_to_date_report(data: object, as_of: str) -> dict:
+    """Validate a whole provisional summary; never accept details or fabricate history."""
+    def require(condition):
+        if not condition:
+            raise FcUnavailable('Finance Core returned an invalid month-to-date summary.')
+    def shape(value, fields):
+        require(isinstance(value, dict) and set(value) == set(fields.split()))
+    shape(data, 'schemaVersion calculationVersion month asOf windowStart windowEndExclusive periodStatus status revision period coverage')
+    require(type(data['schemaVersion']) is int and data['schemaVersion'] == 1
+        and data['calculationVersion'] == 'month-to-date-v1' and data['asOf'] == as_of
+        and data['month'] == as_of[:7] and data['windowStart'] == as_of[:7] + '-01'
+        and data['windowEndExclusive'] == (date.fromisoformat(as_of) + timedelta(days=1)).isoformat()
+        and data['periodStatus'] == 'partial' and isinstance(data['revision'], str)
+        and re.fullmatch(r'[a-f0-9]{64}', data['revision']) is not None)
+    coverage = data['coverage']
+    shape(coverage, 'ledgerCalculation externalCompleteness accountClassification invalidDateEntryCount activityBasis unrecordedDays')
+    require(coverage['externalCompleteness'] == coverage['unrecordedDays'] == 'unknown'
+        and coverage['accountClassification'] == 'current-account-definitions'
+        and coverage['activityBasis'] == 'posted-journal-only'
+        and type(coverage['invalidDateEntryCount']) is int and coverage['invalidDateEntryCount'] >= 0)
+    if data['status'] == 'blocked':
+        require(data['period'] is None and coverage['ledgerCalculation'] == 'blocked' and coverage['invalidDateEntryCount'] > 0)
+        return data
+    require(data['status'] == 'ready' and coverage['ledgerCalculation'] == 'complete' and coverage['invalidDateEntryCount'] == 0)
+    period = data['period']
+    shape(period, 'month postedEntryCount reversalEntryCount otherCategoryPostingCount currencies')
+    require(period['month'] == as_of[:7] and isinstance(period['currencies'], list))
+    for key in ('postedEntryCount', 'reversalEntryCount', 'otherCategoryPostingCount'):
+        require(type(period[key]) is int and period[key] >= 0)
+    require(period['reversalEntryCount'] <= period['postedEntryCount'])
+    amounts = 'cashInflow cashOutflow cashNet income expenses netIncome cashAdjustment incomeAdjustment expenseAdjustment'.split()
+    changes = 'cashNetChange incomeChange expensesChange'.split()
+    codes = []
+    for currency in period['currencies']:
+        shape(currency, 'commodityCode ' + ' '.join(amounts + changes))
+        code = currency['commodityCode']
+        require(isinstance(code, str) and re.fullmatch(r'[A-Z0-9][A-Z0-9._-]{0,23}', code) is not None)
+        codes.append(code)
+        for key in amounts:
+            require(isinstance(currency[key], str) and re.fullmatch(r'-?(0|[1-9][0-9]*)(\.[0-9]+)?', currency[key]) is not None)
+        require(not currency['cashInflow'].startswith('-') and not currency['cashOutflow'].startswith('-'))
+        require(all(currency[key] is None for key in changes))
+    require(codes == sorted(set(codes)))
+    return data
+
+
 def _economic_report(data: object, as_of: str, through: str) -> dict:
     """Summary-only wire validation, never financial recomputation or owner reads."""
     def require(condition):
@@ -233,7 +284,13 @@ def _record(client: httpx.Client, workspace_id: str, record_id: str) -> dict:
     match = RECORD_ID.fullmatch(record_id)
     if match is None:
         raise ValueError("Invalid record ID.")
-    kind, raw_id, month, as_of, through = match.groups()
+    kind, raw_id, month, as_of, through, cutoff = match.groups()
+    if cutoff is not None:
+        path = f"/api/v3/workspaces/{quote(workspace_id, safe='')}/reports/month-to-date?asOf={cutoff}"
+        payload = _get(client, path)
+        if payload.get('workspaceId') != workspace_id or payload.get('readOnly') is not True:
+            raise FcUnavailable('Finance Core returned a mismatched Workspace response.')
+        return _month_to_date_report(payload.get('data'), cutoff)
     if as_of is not None:
         path = f"/api/v3/workspaces/{quote(workspace_id, safe='')}/reports/economic-evidence?asOf={as_of}&through={through}"
         payload = _get(client, path)
@@ -259,6 +316,8 @@ def _record(client: httpx.Client, workspace_id: str, record_id: str) -> dict:
 
 
 def _label(record_id: str, data: dict) -> str:
+    if record_id.startswith('month-to-date:'):
+        return f'Month-to-date through {record_id.split(":")[1]} (partial; posted Journal only)'
     if record_id.startswith('economic-evidence:'):
         _, as_of, through = record_id.split(':')
         return f'Economic evidence {as_of} through {through} (gross recorded balances; not personal affordability)'
@@ -270,6 +329,10 @@ def _label(record_id: str, data: dict) -> str:
 
 
 def _evidence(record_id: str, data: dict) -> dict[str, str]:
+    if record_id.startswith('month-to-date:'):
+        return {'recordId': record_id, 'label': _label(record_id, data), 'revision': data['revision'],
+            'text': 'Provisional month-to-date review. Posted Journal only; unrecorded days and external completeness remain unknown.\n'
+                + json.dumps(data, ensure_ascii=False, sort_keys=True, indent=2)}
     if record_id.startswith('economic-evidence:'):
         return {'recordId': record_id, 'label': _label(record_id, data), 'revision': data['revision'],
                 'text': 'Deterministic economic evidence. Gross balances; future charges and external completeness remain unknown.\n' + json.dumps(data, ensure_ascii=False, sort_keys=True, indent=2)}
@@ -357,7 +420,7 @@ def list_scopes(scope_id: str | None = None) -> dict:
                 if scope_id is not None:
                     raise ValueError("Invalid Workspace scope.")
                 continue
-            records = [{"id": item, "label": _label(item, {} if item.startswith(("monthly-review:", 'economic-evidence:')) else _record(client, workspace_id, item))}
+            records = [{"id": item, "label": _label(item, {} if item.startswith(("monthly-review:", 'economic-evidence:', 'month-to-date:')) else _record(client, workspace_id, item))}
                        for item in ids]
             result.append({"id": workspace_id, "label": workspace.get("displayName", workspace_id),
                            "records": records})

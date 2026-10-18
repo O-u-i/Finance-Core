@@ -236,6 +236,30 @@ class MonthlyReviewResponse(WorkspaceLedgerResponse):
     read_only: Literal[True] = Field(alias="readOnly")
 
 
+class MonthToDateCoverage(MonthlyReviewCoverage):
+    activity_basis: Literal['posted-journal-only'] = Field(alias='activityBasis')
+    unrecorded_days: Literal['unknown'] = Field(alias='unrecordedDays')
+
+
+class MonthToDateReview(ContractModel):
+    schema_version: Literal[1] = Field(alias='schemaVersion')
+    calculation_version: Literal['month-to-date-v1'] = Field(alias='calculationVersion')
+    month: str = Field(pattern=r'^[0-9]{4}-(0[1-9]|1[0-2])$')
+    as_of: str = Field(alias='asOf')
+    window_start: str = Field(alias='windowStart')
+    window_end_exclusive: str = Field(alias='windowEndExclusive')
+    period_status: Literal['partial'] = Field(alias='periodStatus')
+    status: Literal['ready', 'blocked']
+    revision: str = Field(pattern=r'^[a-f0-9]{64}$')
+    period: MonthlyReviewMonth | None
+    coverage: MonthToDateCoverage
+
+
+class MonthToDateReviewResponse(WorkspaceLedgerResponse):
+    data: MonthToDateReview
+    read_only: Literal[True] = Field(alias='readOnly')
+
+
 class EconomicBalance(ContractModel):
     segment: Literal['investment', 'living']
     currency: str

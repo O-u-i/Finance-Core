@@ -1,6 +1,6 @@
 # Economic evidence and explicit debt timing
 
-Product/API **3.8.0**, ledger schema **3**, registry schema **1**. Ownership: **BOTH** for the released summary/reader contract; repayment recording, calculations, storage and standalone UI are **FC_ONLY**. No new dependency or financial connector.
+Product/API **3.9.0**, ledger schema **3**, registry schema **1**. Ownership: **BOTH** for the released summary/reader contract; repayment recording, calculations, storage and standalone UI are **FC_ONLY**. No new dependency or financial connector.
 
 ## Recorded facts, not personal affordability
 
@@ -46,6 +46,6 @@ If a personal schema-2 source needs schema 3, use the separately authorized stop
 
 ## Reader and verification boundaries
 
-Official reader **1.8.0 / protocol 2**, API **3.8.0**, minimum FRAG **1.13.2**, adds only `economic-evidence:YYYY-MM-DD:YYYY-MM-DD` selected summary records. Discovery derives labels without fetching reports. Calendar/horizon/whitelist checks occur before HTTP; the adapter validates an exact summary-only wire shape and retains the whole report. FC arithmetic is not reimplemented in FRAG. Read tokens remain read-only; test write tokens are only for isolated FC HTTP acceptance.
+Official reader **1.9.0 / protocol 2**, API **3.9.0**, minimum FRAG **1.13.3**, retains `economic-evidence:YYYY-MM-DD:YYYY-MM-DD` selected summary records introduced in 3.8.0. The separate [month-to-date report](11-month-to-date-review.md) does not replace this stock/obligation contract. Discovery derives labels without fetching reports. Calendar/horizon/whitelist checks occur before HTTP; the adapter validates an exact summary-only wire shape and retains the whole report. FC arithmetic is not reimplemented in FRAG. Read tokens remain read-only; test write tokens are only for isolated FC HTTP acceptance.
 
 Synthetic HTTP regressions cover explicit confirmation, persistence/restart, concurrent double confirmation, correction history, stale revisions, invalid dates/amounts, scope isolation, unknown dates, backup preservation/atomic rejection and sandbox restrictions. Official adapter tests cover exact GETs, wire/privacy validation and no eager report fetch. Offline regression, isolated loopback integration, native-window observation and human financial acceptance are separate evidence layers. A missing-data refusal is not a complete positive Slice B acceptance.

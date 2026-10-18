@@ -4,7 +4,7 @@ Cash movements and recognized income/expenses are different axes. No source
 names, transaction descriptions, implicit FX or completeness claims escape.
 """
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import hashlib
 import json
@@ -105,3 +105,33 @@ def monthly_review(month: str, entries: list[dict], postings: list[dict], *, exc
             "reversalEntryCount": sum(bool(entry["reversal_of"]) for entry in period_entries),
             "otherCategoryPostingCount": other[period], "currencies": rows})
     return report
+
+
+def month_to_date_window(as_of: str) -> tuple[str, str]:
+    if not isinstance(as_of, str) or not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', as_of):
+        raise ValueError('asOf must be a real YYYY-MM-DD date, not in the future (Asia/Shanghai).')
+    day = date.fromisoformat(as_of)
+    if day > datetime.now(timezone(timedelta(hours=8))).date():
+        raise ValueError('asOf must not be in the future (Asia/Shanghai).')
+    month_window(as_of[:7])  # Keep the existing calculation's supported calendar range.
+    return as_of[:7] + '-01', (day + timedelta(days=1)).isoformat()
+
+
+def month_to_date_review(as_of: str, entries: list[dict], postings: list[dict]) -> dict:
+    """Reuse the established Decimal axes, without prior-month zeroes/comparisons."""
+    start, end = month_to_date_window(as_of)
+    excluded = {entry['id'] for entry in entries if isinstance(entry['date'], str)
+                and not start <= entry['date'] < end}
+    # monthly_review still validates EVERY posted date, including excluded rows.
+    base = monthly_review(as_of[:7], entries, postings, exclude_entry_ids=excluded)
+    period = base['months'][-1] if base['status'] == 'ready' else None
+    if period is not None:
+        for row in period['currencies']:
+            for key in ('cashNetChange', 'incomeChange', 'expensesChange'):
+                row[key] = None
+    source = {'calculationVersion': 'month-to-date-v1', 'asOf': as_of, 'sourceRevision': base['revision']}
+    revision = hashlib.sha256(json.dumps(source, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    return {'schemaVersion': 1, 'calculationVersion': 'month-to-date-v1',
+        'month': as_of[:7], 'asOf': as_of, 'windowStart': start, 'windowEndExclusive': end,
+        'periodStatus': 'partial', 'status': base['status'], 'revision': revision, 'period': period,
+        'coverage': {**base['coverage'], 'activityBasis': 'posted-journal-only', 'unrecordedDays': 'unknown'}}

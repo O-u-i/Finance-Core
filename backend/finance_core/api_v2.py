@@ -50,6 +50,7 @@ from finance_core.contracts_v3 import (
     MonthlyPlanListResponse,
     MonthlyPlanMutationResponse,
     MonthlyReviewResponse,
+    MonthToDateReviewResponse,
     PriceQuoteDeleteResponse,
     PriceQuoteListResponse,
     PriceQuoteMutationResponse,
@@ -171,6 +172,7 @@ class LedgerContractRouter(APIRouter):
             ("/financial-statements", "GET"): FinancialStatementListResponse,
             ("/cash-flow", "GET"): CashFlowResponse,
             ("/reports/monthly-review", "GET"): MonthlyReviewResponse,
+            ('/reports/month-to-date', 'GET'): MonthToDateReviewResponse,
             ("/import/accounting-rows/validate", "POST"): AccountingCsvPreviewResponse,
             ("/reconciliation", "GET"): ReconciliationResponse,
             ("/world", "GET"): WorldResponse,
@@ -748,6 +750,13 @@ def create_v2_router(
     def monthly_review_report(month: str, request: Request) -> dict[str, Any]:
         try:
             return {"data": repo(request).monthly_review(month), "readOnly": True}
+        except ValueError as error:
+            raise translate(error) from error
+
+    @router.get('/reports/month-to-date')
+    def month_to_date_report(request: Request, as_of: str = Query(alias='asOf')) -> dict[str, Any]:
+        try:
+            return {'data': repo(request).month_to_date_review(as_of), 'readOnly': True}
         except ValueError as error:
             raise translate(error) from error
 

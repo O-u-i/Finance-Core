@@ -11,7 +11,7 @@ from uuid import uuid4
 from finance_core.database import transaction
 from finance_core import ledger_backup, ledger_reports
 from finance_core.personal_finance_snapshot import PersonalFinanceSnapshot
-from finance_core.monthly_review import monthly_review, month_window
+from finance_core.monthly_review import monthly_review, month_window, month_to_date_review, month_to_date_window
 from finance_core.ledger import (
     complete_entry, decimal_add, decimal_mul, decimal_sub, decimal_sum,
     quantize, quantize_ratio,
@@ -688,17 +688,30 @@ class LedgerRepository:
             raise ValueError("Monthly review requires a completed calendar month (Asia/Shanghai).")
         self.connection.execute("SAVEPOINT monthly_review_read")
         try:
-            entries = [dict(row) for row in self.connection.execute(
-                "SELECT id,date,balancing_commodity_code,reversal_of FROM journal_entries_v2 ORDER BY id")]
-            postings = [dict(row) for row in self.connection.execute(
-                "SELECT p.id,p.entry_id,p.account_id,p.side,p.units,p.commodity_code,"
-                "p.valuation_amount,p.cash_flow_category,a.type,a.subtype "
-                "FROM postings_v2 p JOIN journal_entries_v2 e ON e.id=p.entry_id "
-                "JOIN accounts_v2 a ON a.id=p.account_id WHERE e.date>=? AND e.date<? "
-                "ORDER BY p.entry_id,p.sort_order", (start, end))]
+            entries, postings = self._review_inputs(start, end)
             return monthly_review(month, entries, postings)
         finally:
             self.connection.execute("RELEASE monthly_review_read")
+
+    def month_to_date_review(self, as_of: str) -> dict[str, Any]:
+        start, end = month_to_date_window(as_of)
+        self.connection.execute('SAVEPOINT month_to_date_read')
+        try:
+            entries, postings = self._review_inputs(start, end)
+            return month_to_date_review(as_of, entries, postings)
+        finally:
+            self.connection.execute('RELEASE month_to_date_read')
+
+    def _review_inputs(self, start: str, end: str) -> tuple[list[dict], list[dict]]:
+        entries = [dict(row) for row in self.connection.execute(
+            "SELECT id,date,balancing_commodity_code,reversal_of FROM journal_entries_v2 ORDER BY id")]
+        postings = [dict(row) for row in self.connection.execute(
+            "SELECT p.id,p.entry_id,p.account_id,p.side,p.units,p.commodity_code,"
+            "p.valuation_amount,p.cash_flow_category,a.type,a.subtype "
+            "FROM postings_v2 p JOIN journal_entries_v2 e ON e.id=p.entry_id "
+            "JOIN accounts_v2 a ON a.id=p.account_id WHERE e.date>=? AND e.date<? "
+            "ORDER BY p.entry_id,p.sort_order", (start, end))]
+        return entries, postings
 
     def account_flows(self) -> list[dict[str, Any]]:
         return ledger_reports.account_flows(self)
