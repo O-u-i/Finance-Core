@@ -193,7 +193,10 @@ export function Select({ label, help, value, defaultValue, onChange, options = [
     if (!options[i] || trigger.current?.matches(':disabled')) return;
     const next = options[i].value; setLocalValue(next);
     // Preserve native form submission and delegated dirty tracking for uncontrolled forms.
-    if (native.current) { native.current.value = next; native.current.dispatchEvent(new Event('change', { bubbles: true })); }
+    if (native.current) {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(native.current, next);
+      native.current.dispatchEvent(new Event('change', { bubbles: true }));
+    }
     setOpen(false); trigger.current?.focus();
   };
   const keyDown = (event) => {

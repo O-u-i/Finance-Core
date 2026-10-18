@@ -3,6 +3,7 @@ import { API_VERSION, SERVICE_VERSION } from '../api.js';
 import { Button, Panel, ResourceForm, Table, options } from '../components.jsx';
 import Setup from './Setup.jsx';
 import { Backup } from './Data.jsx';
+import ReaderAccess from '../ReaderAccess.jsx';
 
 export default function Settings({ fc }) {
   const control = async (api, path, body, method = 'POST') => {
@@ -20,6 +21,7 @@ export default function Settings({ fc }) {
   const active = fc.workspaces.filter((item) => item.status === 'active').map((item) => ({ value: item.id, label: item.displayName }));
   return <>
     <Setup fc={fc} compact/>
+    <ReaderAccess fc={fc}/>
     <Backup fc={fc}/>
     <Panel title="Workspaces" description="Each Vault owns one complete finance database. Archive for read-only access or move files to recoverable quarantine.">
       <ResourceForm fc={{ ...fc, readonly: false }} fields={[
@@ -28,6 +30,7 @@ export default function Settings({ fc }) {
       {fc.controlUndo && <div className="notice">Undo available for {fc.controlUndo.operationType}. <Button disabled={fc.busy} onClick={undo}>Undo workspace operation</Button></div>}
       <Table rows={fc.workspaces} columns={[['displayName', 'Name'], ['kind', 'Kind'], ['status', 'Status'], ['actions', 'Actions', (item) => <div className="actions">{item.status !== 'quarantined' && <><Button disabled={fc.busy} onClick={() => fc.run((api) => control(api, `/api/v3/workspaces/${item.id}`, { status: item.status === 'active' ? 'archived' : 'active' }, 'PATCH'), 'Workspace status updated.', { write: false })}>{item.status === 'active' ? 'Archive' : 'Restore'}</Button><Button danger disabled={fc.busy} onClick={() => { if (confirm('Move this Vault into recoverable quarantine? Files will be preserved.')) fc.run((api) => control(api, `/api/v3/workspaces/${item.id}`, undefined, 'DELETE'), 'Vault quarantined.', { write: false, reload: false }); }}>Quarantine</Button></>}</div>]]}/>
     </Panel>
+    <details><summary>Advanced API access · non-FRAG clients and sandbox HTTP tests</summary>
     <Panel title="API access" description="Issue a token for a local backend client. Access tokens stay out of browser storage and source code.">
       <ResourceForm fc={{ ...fc, readonly: false }} fields={[
         ['name', 'Token name'], ['workspaceId', 'Workspace', 'text', active], ['scope', 'Scope', 'text', [{ value: 'ledger:read', label: 'Read only' }, { value: 'ledger:write', label: 'Read and write' }]],
@@ -35,9 +38,10 @@ export default function Settings({ fc }) {
         const result = await api.request('/api/v3/access-tokens', { method: 'POST', body: { name: values.name, workspaceIds: [values.workspaceId], scopes: values.scope === 'ledger:write' ? ['ledger:read', 'ledger:write'] : ['ledger:read'] } });
         fc.setOneTimeToken(result.token); return result;
       }, 'Token created. Copy it now; it is displayed once.', { write: false })}/>
-      {fc.oneTimeToken && <div className="token-once"><strong>Shown once</strong><code>{fc.oneTimeToken}</code><Button onClick={() => fc.setOneTimeToken('')}>Dismiss token</Button></div>}
-      <Table rows={fc.data.tokens} columns={[['name', 'Name'], ['scopes', 'Scopes', (item) => item.scopes.join(', ')], ['revokedAt', 'Status', (item) => item.revokedAt ? 'Revoked' : 'Active'], ['actions', 'Actions', (item) => !item.revokedAt && <Button danger disabled={fc.busy} onClick={() => { if (confirm('Revoke this token permanently?')) fc.run((api) => api.request(`/api/v3/access-tokens/${item.id}/revoke`, { method: 'POST' }), 'Token revoked.', { write: false }); }}>Revoke</Button>]]}/>
+      {typeof fc.oneTimeToken === 'string' && fc.oneTimeToken && <div className="token-once"><strong>Shown once</strong><code>{fc.oneTimeToken}</code><Button onClick={() => fc.setOneTimeToken('')}>Dismiss token</Button></div>}
     </Panel>
+    </details>
+    <Panel title="Issued access"><Table rows={fc.data.tokens} columns={[['name', 'Name'], ['scopes', 'Access', item=>item.readGrant ? `Financial read · ${item.readGrant.mode}` : item.scopes.join(', ')], ['revokedAt', 'Status', item=>item.revokedAt ? 'Revoked' : 'Active'], ['actions', 'Actions', item=>!item.revokedAt && <Button danger disabled={fc.busy} onClick={()=>{if(confirm('Revoke this token permanently?')) fc.run(api=>api.request(`/api/v3/access-tokens/${item.id}/revoke`,{method:'POST'}),'Token revoked.',{write:false});}}>Revoke</Button>]]}/></Panel>
     <Panel title="About Finance Core"><dl className="version-list"><dt>Product</dt><dd>{SERVICE_VERSION}</dd><dt>API contract</dt><dd>{API_VERSION}</dd><dt>Ledger schema</dt><dd>{fc.health?.ledgerSchemaVersion}</dd><dt>Registry schema</dt><dd>{fc.health?.registrySchemaVersion}</dd><dt>Session</dt><dd>Local owner · HttpOnly cookie</dd></dl><p>Finance Core owns financial records and deterministic calculations. It does not connect to banks, brokers, live prices or language models.</p><Button disabled={fc.busy} onClick={fc.signOut}>Sign out</Button></Panel>
   </>;
 }

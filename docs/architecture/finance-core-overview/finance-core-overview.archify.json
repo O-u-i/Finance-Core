@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "Finance Core 3.9.0 architecture",
+    "title": "Finance Core 3.10.0 architecture",
     "locale": "en",
     "quality_profile": "showcase",
     "viewBox": [
@@ -28,7 +28,7 @@
     {
       "id": "frag_plugin",
       "type": "external",
-      "label": "Official reader 1.9.0",
+      "label": "Official reader 1.10.0",
       "sublabel": "Optional / protocol 2",
       "pos": [
         60,
@@ -43,7 +43,7 @@
       "id": "api_v3",
       "type": "backend",
       "label": "Workspace HTTP API",
-      "sublabel": "/api/v3 / API 3.9.0",
+      "sublabel": "/api/v3 / API 3.10.0",
       "pos": [
         330,
         245
@@ -206,7 +206,7 @@
       "title": "Unchanged data ownership",
       "items": [
         "FC is the only Vault writer; schema stays 3",
-        "Reader 1.9.0 pins API 3.9.0"
+        "Reader 1.10.0 pins API 3.10.0"
       ]
     }
   ]

@@ -1,9 +1,10 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  define: { __FC_API_URL__: JSON.stringify(process.env.FC_UI_API_TARGET || 'http://127.0.0.1:8788') },
   optimizeDeps: { entries: ['index.html'] },
   build: {
-    outDir: 'dist/v3.9.0',
+    outDir: 'dist/v3.10.0',
     emptyOutDir: false,
     modulePreload: false,
     rollupOptions: {

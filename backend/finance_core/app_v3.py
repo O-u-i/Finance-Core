@@ -67,7 +67,7 @@ def create_app(
 
     app = FastAPI(
         title="Finance Core API",
-        version="3.9.0",
+        version="3.10.0",
         description="Local-first deterministic finance domain and multi-vault data service.",
         lifespan=lifespan,
     )
@@ -82,6 +82,8 @@ def create_app(
     app.include_router(scoped_router)
     from finance_core.api_personal import create_personal_router
     app.include_router(create_personal_router())
+    from finance_core.api_reader import create_reader_router
+    app.include_router(create_reader_router())
 
     original_openapi = app.openapi
 

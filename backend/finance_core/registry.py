@@ -22,6 +22,7 @@ from finance_core.ledger_repository import LedgerRepository
 REGISTRY_SCHEMA_VERSION = 1
 OWNER_USER_ID = "local-owner"
 TOKEN_PREFIX = "fcv3_"
+READ_TOKEN_PREFIX = 'fcv3r_'
 
 
 def now() -> datetime:
@@ -57,6 +58,7 @@ class Actor:
     workspace_ids: frozenset[str]
     scopes: frozenset[str]
     expires_at: str | None = None
+    read_grant: dict | None = None
 
     @property
     def is_admin(self) -> bool:
@@ -489,6 +491,7 @@ class Registry:
     @synchronized
     def create_access_token(
         self, name: str, workspace_ids: list[str], scopes: list[str], expires_at: str | None,
+        read_grant: dict | None = None,
     ) -> tuple[dict[str, Any], str]:
         allowed_scopes = {"ledger:read", "ledger:write"}
         if not name.strip() or not workspace_ids or not set(scopes).issubset(allowed_scopes) or not scopes:
@@ -496,7 +499,13 @@ class Registry:
         for workspace_id in workspace_ids:
             if self.get_workspace(workspace_id) is None:
                 raise LookupError("Workspace was not found.")
-        secret = TOKEN_PREFIX + secrets.token_urlsafe(32)
+        if read_grant is not None:
+            from finance_core.contracts_v3 import ReaderGrant
+            read_grant = ReaderGrant.model_validate(read_grant).model_dump(by_alias=True)
+            if len(workspace_ids) != 1 or set(scopes) != {'ledger:read'}:
+                raise ValueError('Financial read grants require one Vault and read-only access.')
+        # Older FC versions reject the distinct prefix rather than ignoring a restriction.
+        secret = (READ_TOKEN_PREFIX if read_grant is not None else TOKEN_PREFIX) + secrets.token_urlsafe(32)
         token_id = str(uuid4())
         created = now_iso()
         with self.transaction():
@@ -504,6 +513,13 @@ class Registry:
                 "INSERT INTO access_tokens(id,name,token_digest,workspace_ids_json,scopes_json,created_at,expires_at) VALUES(?,?,?,?,?,?,?)",
                 (token_id, name.strip(), digest(secret), json.dumps(sorted(set(workspace_ids))), json.dumps(sorted(set(scopes))), created, expires_at),
             )
+            if read_grant is not None:
+                # Compatible registry extension only during explicit owner token creation.
+                # Startup and legacy token use never migrate financial or registry state.
+                self.connection.execute('CREATE TABLE IF NOT EXISTS access_token_read_grants('
+                    'token_id TEXT PRIMARY KEY REFERENCES access_tokens(id), policy_json TEXT NOT NULL) STRICT')
+                self.connection.execute('INSERT INTO access_token_read_grants VALUES(?,?)',
+                    (token_id, json.dumps(read_grant, sort_keys=True, separators=(',', ':'))))
         return self.get_access_token(token_id), secret  # type: ignore[return-value]
 
     @synchronized
@@ -511,13 +527,25 @@ class Registry:
         row = self.connection.execute("SELECT * FROM access_tokens WHERE id=?", (token_id,)).fetchone()
         return self._token_metadata(row) if row else None
 
-    @staticmethod
-    def _token_metadata(row: sqlite3.Row) -> dict[str, Any]:
-        return {
+    def _token_metadata(self, row: sqlite3.Row) -> dict[str, Any]:
+        result = {
             "id": row["id"], "name": row["name"], "workspaceIds": json.loads(row["workspace_ids_json"]),
             "scopes": json.loads(row["scopes_json"]), "createdAt": row["created_at"],
             "expiresAt": row["expires_at"], "revokedAt": row["revoked_at"], "lastUsedAt": row["last_used_at"],
         }
+        grant = self._read_grant(row['id'])
+        if grant is not None:
+            result['readGrant'] = grant
+        return result
+
+    def _read_grant(self, token_id: str) -> dict | None:
+        if not self.connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='access_token_read_grants'").fetchone():
+            return None
+        row = self.connection.execute('SELECT policy_json FROM access_token_read_grants WHERE token_id=?', (token_id,)).fetchone()
+        if row is None:
+            return None
+        from finance_core.contracts_v3 import ReaderGrant
+        return ReaderGrant.model_validate_json(row['policy_json']).model_dump(by_alias=True)
 
     @synchronized
     def list_access_tokens(self) -> list[dict[str, Any]]:
@@ -525,18 +553,27 @@ class Registry:
 
     @synchronized
     def authenticate_token(self, secret: str | None) -> Actor | None:
-        if not secret or not secret.startswith(TOKEN_PREFIX):
+        if not secret or not secret.startswith((TOKEN_PREFIX, READ_TOKEN_PREFIX)):
             return None
         row = self.connection.execute(
             "SELECT * FROM access_tokens WHERE token_digest=? AND revoked_at IS NULL", (digest(secret),)
         ).fetchone()
         if row is None or (row["expires_at"] and datetime.fromisoformat(row["expires_at"]) <= now()):
             return None
+        grant = None
+        if secret.startswith(READ_TOKEN_PREFIX):
+            try:
+                grant = self._read_grant(row['id'])
+            except (ValueError, sqlite3.Error):
+                return None
+            if grant is None or json.loads(row['scopes_json']) != ['ledger:read'] or len(json.loads(row['workspace_ids_json'])) != 1:
+                return None
         self.connection.execute("UPDATE access_tokens SET last_used_at=? WHERE id=?", (now_iso(), row["id"]))
         return Actor(
             "token", row["id"], OWNER_USER_ID,
             frozenset(json.loads(row["workspace_ids_json"])), frozenset(json.loads(row["scopes_json"])),
             row["expires_at"],
+            grant,
         )
 
     @synchronized

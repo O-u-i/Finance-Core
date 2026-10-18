@@ -13,7 +13,7 @@ export function mount(element, { apiBase }) {
 
   async function get(path) {
     const response = await fetch(`${apiBase}${path}`, { signal: controller.signal, credentials: 'same-origin' });
-    if (!response.ok) throw new Error(response.status === 409 ? 'Finance Core API 3.9.0 is required.' : 'Finance Core is unavailable.');
+    if (!response.ok) throw new Error(response.status === 409 ? 'Finance Core API 3.10.0 is required.' : 'Finance Core is unavailable.');
     return response.json();
   }
 

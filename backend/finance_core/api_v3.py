@@ -14,6 +14,7 @@ from finance_core.api_v2 import create_v2_router
 from finance_core.contracts_v3 import (
     BEARER_OR_SESSION_SECURITY,
     CurrentAccessTokenResponse,
+    ReaderGrant,
     HealthResponse,
     LedgerResponse,
     MeResponse,
@@ -51,6 +52,7 @@ class AccessTokenCreate(V3Model):
     workspace_ids: list[str] = Field(alias="workspaceIds", min_length=1)
     scopes: list[Literal["ledger:read", "ledger:write"]] = Field(min_length=1)
     expires_at: datetime | None = Field(default=None, alias="expiresAt")
+    read_grant: ReaderGrant | None = Field(default=None, alias='readGrant')
 
 
 class V3UndoRequest(V3Model):
@@ -126,6 +128,12 @@ async def ledger_context(store: Registry, workspace_id: str, actor: Actor, *, wr
 async def workspace_context(
     workspace_id: str, request: Request, actor: Actor = Depends(authenticate),
 ) -> AsyncIterator[None]:
+    if actor.read_grant is not None:
+        authorize_workspace(registry(request), workspace_id, actor, write=False)
+        from finance_core.reader_reports import permits_path
+        suffix = request.url.path.split('/workspaces/', 1)[1].partition('/')[2]
+        if not permits_path(actor.read_grant, '/' + suffix, request.method):
+            raise HTTPException(403, detail={'code': 'TOKEN_SCOPE_DENIED', 'message': 'The financial read grant does not permit this operation.'})
     write = request.method in {'POST', 'PUT', 'PATCH', 'DELETE'} and not request.url.path.endswith('/validate')
     async with ledger_context(registry(request), workspace_id, actor, write=write) as (workspace, handle):
         request.state.database = handle.connection
@@ -148,10 +156,10 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
             "status": "ok",
             "service": "finance-core",
             "serviceVersion": __version__,
-            "apiVersion": "3.9.0",
+            "apiVersion": "3.10.0",
             "ledgerSchemaVersion": 3,
             "registrySchemaVersion": REGISTRY_SCHEMA_VERSION,
-            "supportedApiVersions": ["3.0.0", "3.1.0", "3.1.1", "3.2.0", "3.3.0", "3.4.0", "3.5.0", "3.6.0", "3.7.0", "3.8.0", "3.9.0"],
+            "supportedApiVersions": ["3.0.0", "3.1.0", "3.1.1", "3.2.0", "3.3.0", "3.4.0", "3.5.0", "3.6.0", "3.7.0", "3.8.0", "3.9.0", "3.10.0"],
             "buildCommit": request.app.state.build_commit,
             "releaseCommit": request.app.state.release_commit,
             "capabilities": [
@@ -206,7 +214,7 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
         }
 
     @router.get(
-        "/access-token-self", response_model=CurrentAccessTokenResponse, responses=STANDARD_ERROR_RESPONSES,
+        "/access-token-self", response_model=CurrentAccessTokenResponse, response_model_exclude_unset=True, responses=STANDARD_ERROR_RESPONSES,
         openapi_extra={"security": [{"BearerAccessToken": []}], "x-fc-required-actor": "access-token"},
     )
     def current_access_token(actor: Actor = Depends(authenticate)) -> dict[str, Any]:
@@ -216,6 +224,7 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
             "tokenId": actor.actor_id, "actorKind": "token", "status": "active",
             "workspaceIds": sorted(actor.workspace_ids), "scopes": sorted(actor.scopes),
             "expiresAt": actor.expires_at,
+            **({'readGrant': actor.read_grant} if actor.read_grant is not None else {}),
         }}
 
     @router.get(
@@ -290,21 +299,31 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
         "/access-tokens", status_code=201, response_model=LedgerResponse, response_model_exclude_unset=True,
         responses=STANDARD_ERROR_RESPONSES, openapi_extra={"security": SESSION_SECURITY},
     )
-    def create_token(
-        payload: AccessTokenCreate, request: Request, actor: Actor = Depends(require_admin),
+    async def create_token(
+        payload: AccessTokenCreate, request: Request, response: Response, actor: Actor = Depends(require_admin),
     ) -> dict[str, Any]:
         try:
             if payload.expires_at is not None and payload.expires_at.tzinfo is None:
                 raise ValueError("expiresAt must include a timezone offset.")
+            if payload.read_grant and payload.read_grant.mode == 'selected':
+                if len(payload.workspace_ids) != 1 or set(payload.scopes) != {'ledger:read'}:
+                    raise ValueError('Financial read grants require one Vault and read-only access.')
+                from finance_core.reader_reports import catalog
+                async with ledger_context(registry(request), payload.workspace_ids[0], actor, write=False) as (_, handle):
+                    available = {item['id'] for item in catalog(handle.connection, {'mode': 'all', 'itemIds': []})['items']}
+                    if not set(payload.read_grant.item_ids).issubset(available):
+                        raise ValueError('Selected financial items are no longer available; refresh Settings.')
             metadata, secret = registry(request).create_access_token(
                 payload.name, payload.workspace_ids, list(payload.scopes),
                 payload.expires_at.isoformat() if payload.expires_at else None,
+                payload.read_grant.model_dump(by_alias=True) if payload.read_grant else None,
             )
         except LookupError as error:
             raise HTTPException(404, detail={"code": "WORKSPACE_NOT_FOUND", "message": str(error)}) from error
         except ValueError as error:
             raise HTTPException(422, detail={"code": "INVALID_REQUEST", "message": str(error)}) from error
         registry(request).audit(str(uuid4()), actor, None, "access-token.create", "success")
+        response.headers['Cache-Control'] = 'no-store'
         return {"data": metadata, "token": secret, "displayOnce": True}
 
     @router.post(
@@ -371,6 +390,6 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
         prefix="/api/v3/workspaces/{workspace_id}",
         dependencies=[Depends(workspace_context, scope="function")],
         service_version=__version__,
-        api_version="3.9.0",
+        api_version="3.10.0",
     )
     return router, scoped

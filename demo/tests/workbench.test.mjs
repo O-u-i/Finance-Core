@@ -12,6 +12,24 @@ before(async () => {
 after(async () => { await server?.close(); });
 const render = (Component, props) => renderToStaticMarkup(React.createElement(Component, props));
 
+test('FRAG connection is one read-only Vault form, not manual Workspace ID or JSON entry', async () => {
+  const {pageSections} = await server.ssrLoadModule('/demo/src/navigation.js');
+  assert.ok(pageSections('settings').some(item=>item.key==='reader-access' && item.label==='Connect FRAG'));
+  const {default:Access,connectionConfiguration} = await server.ssrLoadModule('/demo/src/ReaderAccess.jsx');
+  const fc={workspace:{id:'test-vault'},workspaces:[{id:'test-vault',displayName:'Synthetic sandbox',kind:'sandbox',status:'active'}],client:{},busy:false,oneTimeToken:''};
+  const html=render(Access,{fc});
+  assert.match(html,/Create FRAG connection/); assert.match(html,/Specific accounts or data items/);
+  assert.match(html,/Living/); assert.match(html,/Investment/); assert.match(html,/including future items/);
+  assert.doesNotMatch(html,/workspaceId|RECORDS_JSON|READ_TOKEN|fcv3r_/);
+  const created={data:{workspaceIds:['test-vault'],scopes:['ledger:read'],readGrant:{mode:'living',itemIds:[]}},token:'synthetic-one-time-reader-token'};
+  const text=connectionConfiguration(created,'http://127.0.0.1:8788','http://localhost:5174');
+  assert.equal(text.split('\n').filter(Boolean).length,4);
+  assert.match(text,/FINANCE_CORE_PLUGIN_RECORDS_JSON=\{"test-vault":\[\]\}/);
+  assert.match(text,/READ_TOKEN=synthetic-one-time-reader-token/);
+  assert.throws(()=>connectionConfiguration({...created,data:{...created.data,scopes:['ledger:read','ledger:write']}},'http://127.0.0.1:8788','http://localhost:5174'));
+  assert.throws(()=>connectionConfiguration(created,'https://external.example','http://localhost:5174'));
+});
+
 test('ready identity can be FINCR-only without changing the full authentication Logo', () => {
   assert.match(render(components.Logo, {}), /Finance Core/);
   const ready = render(components.Logo, { markOnly:true, small:true });

@@ -30,6 +30,80 @@ DRAFT = "draft:synthetic-draft"
 REPORT = "monthly-review:2025-03"
 
 
+def test_dedicated_reader_catalog_and_selected_item_use_only_released_gets(monkeypatch, tmp_path):
+    from test_v2 import client
+    with client(tmp_path) as scoped:
+        api, prefix = scoped.api, scoped.prefix
+        wid = prefix.rsplit('/', 1)[1]
+        assert scoped.post('/api/v2/demo/load-synthetic?profile=economic-evidence&asOf=2026-08-31').status_code == 201
+        token = api.post('/api/v3/access-tokens', json={'name': 'Reader integration', 'workspaceIds': [wid],
+            'scopes': ['ledger:read'], 'readGrant': {'mode': 'living', 'itemIds': []}}).json()['token']
+        expected = api.get(prefix + '/reader/catalog', headers={'Authorization': 'Bearer ' + token}).json()['data']['items']
+        account = next(item for item in expected if item['kind'] == 'account')
+        record = 'finance-item:' + account['id']
+        configured(monkeypatch, records={wid: []})
+        monkeypatch.setenv('FINANCE_CORE_PLUGIN_READ_TOKEN', token)
+        seen = []
+        def handle(request):
+            assert request.method == 'GET'
+            seen.append(request.url.raw_path.decode())
+            return api.get(request.url.raw_path.decode(), headers={'Authorization': request.headers['authorization']})
+        monkeypatch.setattr(adapter, '_client', lambda base, secret: httpx.Client(base_url=base,
+            headers={'Authorization': 'Bearer ' + secret}, transport=httpx.MockTransport(handle)))
+        metadata = adapter.connection_catalog()
+        assert metadata['workspace']['id'] == wid and metadata['workspace']['kind'] == 'sandbox'
+        assert metadata['readGrant'] == {'mode': 'living', 'itemIds': []}
+        assert metadata['items'] == expected and token not in json.dumps(metadata)
+        assert not any('/reader/items/' in path or '/reports/' in path for path in seen)
+        monkeypatch.setenv('FINANCE_CORE_PLUGIN_RECORDS_JSON', json.dumps({wid: [record]}))
+        listing = adapter.list_scopes(wid)
+        assert listing['scopes'][0]['records'] == [{'id': record, 'label': account['label']}]
+        assert not any('/reader/items/' in path for path in seen)
+        evidence = adapter.read_evidence(wid, [record])[0]
+        data = json.loads(evidence['text'].split('\n', 1)[1])
+        assert data['itemId'] == account['id'] and evidence['revision'] == data['revision']
+        assert data['coverage']['financialAdviceReady'] is False
+        assert token not in evidence['text'] and 'baselineEvidence' not in evidence['text']
+        from urllib.parse import quote
+        assert prefix + '/reader/items/' + quote(account['id'], safe='') in seen
+        before = len(seen)
+        with pytest.raises(ValueError):
+            adapter.read_evidence(wid, ['finance-item:account:' + 'a' * 32])
+        assert len(seen) == before
+
+
+def test_private_reader_instances_are_isolated_and_invalid_reconfiguration_is_atomic(monkeypatch, tmp_path):
+    from test_v2 import client
+    with client(tmp_path) as scoped:
+        api, wid = scoped.api, scoped.prefix.rsplit('/', 1)[1]
+        token = api.post('/api/v3/access-tokens', json={'name': 'Private reader', 'workspaceIds': [wid],
+            'scopes': ['ledger:read'], 'readGrant': {'mode': 'all', 'itemIds': []}}).json()['token']
+        configured(monkeypatch)
+        modules = []
+        for records in ([REPORT], []):
+            instance = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(instance)
+            def handle(request):
+                assert request.method == 'GET'
+                return api.get(request.url.raw_path.decode(), headers={'Authorization': request.headers['authorization']})
+            monkeypatch.setattr(instance, '_client', lambda base, secret: httpx.Client(base_url=base,
+                headers={'Authorization': 'Bearer ' + secret}, transport=httpx.MockTransport(handle)))
+            values = {'FINANCE_CORE_PLUGIN_API_URL': 'http://127.0.0.1:8788',
+                'FINANCE_CORE_PLUGIN_UI_URL': 'http://127.0.0.1:5174',
+                'FINANCE_CORE_PLUGIN_READ_TOKEN': token, 'FINANCE_CORE_PLUGIN_RECORDS_JSON': json.dumps({wid: records})}
+            instance.configure_connection(values)
+            values['FINANCE_CORE_PLUGIN_READ_TOKEN'] = 'caller-mutated-input'
+            modules.append(instance)
+        assert modules[0].connection_catalog()['selectedRecordIds'] == [REPORT]
+        assert modules[1].connection_catalog()['selectedRecordIds'] == []
+        invalid = {**values, 'FINANCE_CORE_PLUGIN_READ_TOKEN': 'not a token'}
+        with pytest.raises(ValueError):
+            modules[0].configure_connection(invalid)
+        assert modules[0].connection_catalog()['selectedRecordIds'] == [REPORT]
+        import os
+        assert json.loads(os.environ['FINANCE_CORE_PLUGIN_RECORDS_JSON']) == {WORKSPACE: [ENTRY, DRAFT]}
+
+
 def monthly_fixture():
     return monthly_review("2025-03", [{"id": "private-entry", "date": "2025-03-01", "balancing_commodity_code": "CNY", "reversal_of": None}], [
         {"entry_id": "private-entry", "type": "asset", "subtype": "cash", "side": "debit", "units": "1.25",
@@ -121,7 +195,7 @@ def configured(monkeypatch: pytest.MonkeyPatch, *, records: dict | None = None) 
     monkeypatch.setenv("FINANCE_CORE_PLUGIN_RECORDS_JSON", json.dumps(records or {WORKSPACE: [ENTRY, DRAFT]}))
 
 
-def fake_fc(monkeypatch: pytest.MonkeyPatch, *, version: str = "3.9.0", available: bool = True, report: dict | None = None):
+def fake_fc(monkeypatch: pytest.MonkeyPatch, *, version: str = "3.10.0", available: bool = True, report: dict | None = None):
     seen: list[str] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -184,11 +258,11 @@ def test_archive_integrity_and_exact_contract():
         manifest = json.loads(package.read("manifest.json"))
         assert manifest == expected_manifest()
         assert manifest["protocolVersion"] == 2
-        assert manifest["version"] == "1.9.0"
-        assert manifest["minHostVersion"] == "1.13.3"
+        assert manifest["version"] == "1.10.0"
+        assert manifest["minHostVersion"] == "1.13.4"
         assert manifest["name"] == "Finance Core"
         assert manifest["capabilities"] == ["evidence.read"]
-        assert manifest["fcApiVersion"] == "3.9.0"
+        assert manifest["fcApiVersion"] == "3.10.0"
     assert "synthetic-read-token" not in (SOURCE / "ui.js").read_text(encoding="utf-8")
     assert "FINANCE_CORE_PLUGIN_READ_TOKEN" not in (SOURCE / "ui.js").read_text(encoding="utf-8")
 

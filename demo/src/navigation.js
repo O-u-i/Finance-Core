@@ -33,7 +33,7 @@ const sections = {
   livingdata: [['import','Import legacy monthly observations'],['export','Living export']],
   data: [['import','Import drafts','Import'],['backup','Investment export','Segment export'],['recurring','Recurring draft templates','Recurring drafts'],['batch','Atomic batch creation','Atomic batch']],
   planning: [['accounts','Living accounts','Living accounts'],['snapshots','Balance snapshots','Snapshots'],['plans','Cash-flow plans','Cash-flow plans'],['summary','Living balance summary','Summary']],
-  settings: [['configuration','Workspace configuration'],['export','Export & backup'],['restore','Restore an empty ledger'],['workspaces','Workspaces'],['api','API access'],['about','About Finance Core']],
+  settings: [['configuration','Workspace configuration'],['reader-access','Connect FRAG'],['export','Export & backup'],['restore','Restore an empty ledger'],['workspaces','Workspaces'],['issued-access','Issued access'],['about','About Finance Core']],
 };
 export function pageSections(view, legacy = false) {
   let values = sections[view] || [];

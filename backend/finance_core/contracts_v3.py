@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from finance_core.models_v2 import (
     Account,
@@ -20,6 +20,62 @@ from finance_core.models_personal import DebtRepaymentRecord, Money, ObservedDat
 
 class ContractModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+
+class ReaderGrant(ContractModel):
+    mode: Literal['all', 'living', 'investment', 'selected']
+    item_ids: list[str] = Field(default_factory=list, alias='itemIds', max_length=500)
+
+    @model_validator(mode='after')
+    def selection(self):
+        import re
+        if ((self.mode == 'selected') != bool(self.item_ids)
+                or len(set(self.item_ids)) != len(self.item_ids)
+                or any(not re.fullmatch(r'(?:account|asset|plan|arrangement|transfer):[a-f0-9]{32}|report:(?:monthly-review|month-to-date|economic-evidence)', item) for item in self.item_ids)):
+            raise ValueError('Select a range or distinct financial items.')
+        return self
+
+
+class ReaderCatalogItem(ContractModel):
+    id: str
+    label: str
+    kind: Literal['account', 'asset', 'plan', 'arrangement', 'transfer', 'report']
+    segment: Literal['living', 'investment'] | None
+
+
+class ReaderCatalog(ContractModel):
+    schema_version: Literal[1] = Field(alias='schemaVersion')
+    read_grant: ReaderGrant = Field(alias='readGrant')
+    items: list[ReaderCatalogItem]
+
+
+class ReaderCatalogResponse(ContractModel):
+    workspace_id: str = Field(alias='workspaceId')
+    data: ReaderCatalog
+    read_only: Literal[True] = Field(alias='readOnly')
+
+
+class ReaderCoverage(ContractModel):
+    selection_only: Literal[True] = Field(alias='selectionOnly')
+    external_completeness: Literal['unknown'] = Field(alias='externalCompleteness')
+    financial_advice_ready: Literal[False] = Field(alias='financialAdviceReady')
+
+
+class ReaderItemEvidence(ContractModel):
+    schema_version: Literal[1] = Field(alias='schemaVersion')
+    item_id: str = Field(alias='itemId')
+    label: str
+    kind: Literal['account', 'asset', 'plan', 'arrangement', 'transfer']
+    segment: Literal['living', 'investment']
+    revision: str = Field(pattern=r'^[a-f0-9]{64}$')
+    content: dict[str, Any]
+    coverage: ReaderCoverage
+
+
+class ReaderItemResponse(ContractModel):
+    workspace_id: str = Field(alias='workspaceId')
+    data: ReaderItemEvidence
+    read_only: Literal[True] = Field(alias='readOnly')
 
 
 class FlexibleContractModel(ContractModel):
@@ -105,6 +161,7 @@ class CurrentAccessToken(ContractModel):
     workspace_ids: list[str] = Field(alias="workspaceIds")
     scopes: list[Literal["ledger:read", "ledger:write"]]
     expires_at: str | None = Field(alias="expiresAt")
+    read_grant: ReaderGrant | None = Field(default=None, alias='readGrant')
 
 
 class CurrentAccessTokenResponse(ContractModel):
