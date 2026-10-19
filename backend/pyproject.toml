@@ -2,6 +2,8 @@
 name = "finance-core"
 version = "3.10.0"
 description = "Local-first deterministic finance domain and data API"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi>=0.121,<1",
@@ -20,7 +22,7 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

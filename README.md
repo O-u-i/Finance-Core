@@ -1,126 +1,153 @@
 # Finance Core 3.10.0
 
-Finance Core (FC) is a local-first finance domain and data service with a standalone desktop UI. FC owns financial rules, exact calculations, application operations, authentication and each Vault's SQLite. It runs independently of FRAG, model providers, banks, brokers and live market services.
+A local-first finance workbench for Investment and Living records. FC owns financial rules, exact calculations and each Vault's SQLite; it runs without FRAG, model providers or external financial services.
 
-Use **Settings → Connect FRAG** to choose one Vault and a readable range, then copy the complete connection configuration. FRAG opens its prepared private file and lets you choose a smaller subset. FC retains all financial writes and calculations. API **3.10.0**, official reader **1.10.0 / protocol 2**, FRAG **1.13.4**. [Financial-read grant contract](docs/md/12-financial-reader-access.md).
+[![Original code: MIT](https://img.shields.io/badge/original_code-MIT-blue.svg)](LICENSE)
+[![GitHub repository](https://img.shields.io/badge/GitHub-Finance--Core-181717?logo=github)](https://github.com/O-u-i/Finance-Core)
 
-## Architecture
+[Issues](https://github.com/O-u-i/Finance-Core/issues) · [Pull requests](https://github.com/O-u-i/Finance-Core/pulls)
 
-![Finance Core 3.10.0 architecture — Light, 2048px](docs/architecture/finance-core-overview/finance-core-overview-light-2048.png)
+**Investment — Synthetic demo data**
 
-This is the only README architecture preview: **Light / 2048px**. [Editable Archify JSON](docs/architecture/finance-core-overview/finance-core-overview.archify.json) and the [checked standalone viewer](docs/architecture/finance-core-overview/finance-core-overview.html) are available for local inspection. The main in-process connections denote route-to-repository and repository-to-domain calls; HTTP, authentication, Workspace resolution and persistence boundaries are labeled explicitly.
+![Investment cash-flow workbench with synthetic demo data](docs/images/investment.png)
 
-- React pages use the Workspace-scoped HTTP client; they never open SQLite or calculate financial amounts.
-- Domain rules do not import FastAPI, SQLite, React, FRAG, SFOS or LLM services.
-- A User, Workspace/Vault and finance Account are distinct. Every finance request names a Workspace; a Vault owns one complete ledger database.
-- Workspace reads, writes and lifecycle changes share a per-Vault lock. Run one FC writer process for a configured data root.
-- The optional FC-owned reader accesses only selected released HTTP records. It is not another financial writer or dashboard runtime.
+**Living — Synthetic demo data**
 
-## Desktop workbench
+![Living account balances with synthetic demo data](docs/images/living.png)
 
-The centered FINCR identity and sticky global navigation lead to independent Overview, Investment, Living, Master data and Settings views. A fluid desktop shell replaces the 1480px width cap. Shared main-column geometry, stable scrollbar gutters and natural page height avoid width and measured-height jumps. Floating notifications and in-place loading feedback do not push the workbench down. System fonts remain; labels are readable rather than compressed into 12–13px controls.
+## Features
 
-**BranchedMenu renders both navigation levels; LineSidebar is retired.** The supplied component's trunk, curved branches, gliding active marker and color-only hover are retained. Independent groups fold with an eased transition. Feature-owned destinations define both the rail and internal tabs, so switching a tab cannot rewrite the menu; single-section pages have no redundant child. Branches use interruptible native smooth scrolling near 25% of the viewport, without forcing heading focus or using a scroll-spy. Reduced-motion users get immediate positioning. Master data and Settings remain one-level menus.
+- Investment and Living workbenches with Workspace-scoped records and reports.
+- Exact financial calculations, draft validation and explicit posting.
+- Local Vault storage, backups and optional read-only evidence sharing with FRAG.
 
-Primary page switches retain the current content until the next page's data and lazy module are ready. The shell stays mounted, the rail does not flash gray during reads, and a visible page heading does not trigger a trip back to the document header. Short reads do not flash a loading toast; longer waits keep busy feedback and prevent interaction with stale page content.
+## Technology
 
-Workspace and Sign out form one compact control group. Master data and Settings show green **Ready** or red **Needs attention** with text, not color alone. Financial tools gray out when configuration cannot be verified; repair navigation remains available. Schema-2 Vaults retain the same five Living destinations with explicit legacy readouts or an unavailable-feature explanation. Browsing never silently migrates a Vault.
+- **UI:** React 19, JavaScript and Vite; desktop-first.
+- **API:** Python 3.12, FastAPI and Pydantic; Workspace-scoped `/api/v3`.
+- **Data:** local SQLite, canonical Decimal strings, explicit validation/posting and reversible operations where supported.
+- **Tools:** Node.js **22+**, npm and `uv`. Lockfiles pin dependencies.
 
-Journal **Close** keeps the editor in session memory, including across page changes. **Resume draft** continues it; **Discard draft** clears unfinished input. For a saved draft, **Discard changes** only clears the editor, not the saved record. Resuming always requires fresh validation and posting confirmation. Save draft is the durable action: reload, Workspace changes and sign-out clear unsaved session input, with a loss warning. No financial data or credentials enter browser storage.
+## First use
 
-Investment and Living retain distinct muted surfaces. White data cards, cool table headers, neutral alternating rows and visible borders provide contrast on Living pages. Status colors remain semantic. Monthly review and other multi-account readouts use T-account-style cards, with filters, exact server amounts, separate currencies and explicit Unknown states. T-account details remain read-only, paged Posting date / Debit / Credit records.
-
-Overview adds a labeled SVG donut and horizontal bars for displayed record items and states. These counts include Unknown readouts where present; they are not combined money, income, returns or evidence of source completeness. Empty views do not invent sample financial data.
-
-Application-owned date/month calendars, ISO date/datetime fields and file-selection labels use English. The external OS file dialog follows the user's system language; FC does not alter OS or browser language settings. Hover/focus help explains ordinary definitions; irreversible actions, errors, read-only states and unknown values stay visible. Desktop is the acceptance target; mobile/device acceptance is not claimed.
-
-## Install and run
-
-Requirements: Node.js, npm, Python 3.12 and `uv`. From the repository root:
+Install Python **3.12**, Node.js **22+**, npm and `uv`. Clone with Git (or
+download/extract the source and start from its repository root):
 
 ```powershell
-npm.cmd install --offline
-uv sync --project backend --cache-dir .tmp/uv-cache
-```
+git clone https://github.com/O-u-i/Finance-Core.git
+Set-Location Finance-Core
+npm.cmd ci
+uv sync --project backend --locked --cache-dir .tmp/uv-cache
 
-Existing pinned dependencies and notices remain subject to their reviewed licenses. No new package is required for 3.10.0.
-
-Set a long random `FINANCE_CORE_ADMIN_TOKEN` before starting. `.env.example` documents supported variables; real values stay outside Git. `FINANCE_CORE_DATA_ROOT` optionally selects a local data root.
-
-```powershell
-$env:FINANCE_CORE_ADMIN_TOKEN = "<long-random-local-secret>"
+$env:FINANCE_CORE_ADMIN_TOKEN = "<long-random-secret-from-your-password-manager>"
 npm.cmd run dev
 ```
 
-- Standalone UI: `http://127.0.0.1:5174`
-- API: `http://127.0.0.1:8788`
-- OpenAPI: `http://127.0.0.1:8788/docs`
+1. Open **http://127.0.0.1:5174** and sign in with that admin token.
+2. Start with a new empty **Sandbox** Vault for synthetic examples; use a separate **Personal** Vault when ready for real records.
+3. Complete **Master data** and **Settings** before entering records. Journal imports create drafts; posting requires separate confirmation.
 
-`npm.cmd run dev:api` starts only the backend. Synthetic sample loading requires an empty sandbox Vault. Authentication uses an owner session cookie; access tokens belong on authorized backend clients, not browser storage or source code.
+The API listens at `127.0.0.1:8788`; OpenAPI is at `http://127.0.0.1:8788/docs`. `npm.cmd run dev:api` starts only the API. Both development servers bind to loopback. Do not expose them through port forwarding, a public proxy or `--host 0.0.0.0`.
 
-## Accounting and review
+Keep the same secret in your password manager and set it in the launch shell. The example is a placeholder, not a usable secret; `.env.example` lists supported variables and is **not loaded automatically**. Optional `FINANCE_CORE_DATA_ROOT` selects the storage root; the default is ignored `.local-data/v3`. Startup does not attach an external Vault or import personal files. [Environment details](docs/md/01-fc-v3-api-env-loading.md).
 
-Investment follows Journal → T-accounts → Securities & positions → Cash flow → Statements → Monthly review. Forms own their inputs; the shell coordinates routes, session and Workspace selection. Obsolete reads are cancelled and duplicate writes are blocked. A page and its scoped data change together after successful reads; failed navigation preserves existing input and unsaved-change protection.
+## Usage
 
-Journal drafts require backend validation and separate human posting confirmation. Amounts, quantities, costs, prices and rates remain canonical Decimal strings. Cross-commodity postings require explicit valuation. Lot disposal requires explicit allocations; FC does not choose a cost-flow or tax policy. Posted entries are immutable; corrections use linked reversals. The existing [opening workflows](docs/md/06-opening-balances-and-notes.md) remain distinct from period income and spending.
+With FC running, use a second PowerShell window to check the API:
 
-Living uses actual-date balance observations, manual asset valuations and general beneficiary agreements. Missing months are unknown, not zero or interpolated values. Balance change is not income or spending. Investment pool assets are not automatically personal wealth. Formal month-end reports and confirmed closes retain their original basis and exact input revisions. Corrections preserve earlier observations and closes. See [unified accounting](docs/md/05-unified-personal-accounting.md).
-
-### Cash-flow plans
-
-Living **Cash-flow plans** supports Monthly, Quarterly, Semi-annual, Annual and One time. **Repeat interval** describes one occurrence per cycle; **Due day (1–31)** chooses a calendar day, not an occurrence count. Both have explanatory help. One-time plans use only their start date and hide Due day.
-
-The optional `repeatEveryMonths` field accepts `1`, `3`, `6` or `12`, default `1`. Existing `/monthly-plans` routes and `recurringMonthly` requests retain their original monthly/one-time behavior when no extension is selected. The start month anchors repeating cycles. Due dates before the start date are excluded; shorter months use their last valid day without shifting later cycles. A February/day-31 quarterly plan is due February 28/29, May 31, August 31 and November 30.
-
-Forecast amounts and category/currency totals are calculated by the backend, not React. They are never prorated into actual spending and never create transactions, payments or Journal entries. Schedule metadata stays in the existing Vault key/value store and participates in the same writer transaction and undo. No DDL migration or repurposed Note field is required. Full format-3 backups retain schedules; legacy format-2 backup refuses extended schedules rather than silently losing them.
-
-### Monthly evidence report
-
-`GET /api/v3/workspaces/{workspaceId}/reports/monthly-review?month=YYYY-MM` returns the completed anchor and prior two Asia/Shanghai calendar months. Cash movements and recognized income/expenses are separate backend calculations. Loans, principal investment, debt repayment and internal transfers are not income/expenses merely because cash moved. Signed reversal adjustments retain their own month; currencies remain separate.
-
-Drafts are excluded, current account roles are stated, invalid posted dates block totals and real-world completeness remains unknown. A concrete `monthly-review:YYYY-MM` whitelist authorizes only that summary, not details, later months or an entire Vault. The optional reader retains whole required evidence or rejects an insufficient budget. This is on-demand evidence, not scheduled advice or trading.
-
-### Import, export and undo
-
-CSV/JSON import creates unposted drafts, never automatic postings. Balanced-row preview groups consecutive rows only when exact debit/credit totals balance, including one-to-many postings. Parent/reference captions do not silently determine grouping; rates are never inferred. Cross-date groups reject by default. An explicitly selected first-row policy preserves every source date and memo without editing the original file. Import and posting require separate confirmations.
-
-Use full format-3 Vault backups for complete recovery, or format 4 when debt arrangements exist. Full formats 3/4 require an owner session on both restore entry points, including legacy `/backup/restore`; ledger tokens cannot import owner-only Vault history. Restore validates format, schema, hash, schedules, financial history and foreign keys inside an empty target Vault. Invalid version types return 422 without changing the target. Ordinary reversible operations expose a single-use undo token, expire after ten minutes and are invalidated by later writes. Immutable observations and closes use explicit corrections, not ordinary undo. Exports and backups are private files; keep them outside Git.
-
-## API and optional reader compatibility
-
-The public API remains rooted at `/api/v3`. The [product 3.10.0 OpenAPI artifact](docs/release/finance-core-v3.10.0-openapi.json) and [release manifest](docs/release/finance-core-v3.10.0-release.json) record the additive API 3.10.0 contract. Existing owner-session-only financial routes remain owner-only; the scoped economic summary requires ledger:read. Debt arrangement writes require ledger:write and explicit confirmation, never create payments or Journal entries, and are not exposed by the reader.
-
-Reader **1.10.0** pins **API 3.10.0**, protocol **2** and minimum host **1.13.4**. Its three-file official archive exposes only explicitly selected records, including exact economic evidence windows. Earlier archives are unchanged. See [plugin contract and verification](docs/md/02-frag-finance-core-plugin.md).
-
-```text
-Cross-repo impact: BOTH_REQUIRED
-Contract change: ADDITIVE
-Other repo status: UPDATED
-Required compatible version: FC product/API 3.10.0 / reader 1.10.0 / protocol 2 / FRAG 1.13.4
-Reason: Single-Vault financial-read grants, safe item/catalog contracts and one-flow private FRAG setup.
+```powershell
+Invoke-RestMethod 'http://127.0.0.1:8788/api/v3/health'
 ```
 
-## Verification and build output
+A health response confirms the API is reachable, not that financial records are
+complete. Keep the new Sandbox selected and define its commodities/accounts in
+**Master data**, then try either workflow:
+
+- **Investment → Journal:** create a synthetic draft, validate/review it and post explicitly; inspect **Cash flow** or **Statements**.
+- **Living → Accounts & balances:** choose **Record a balance**, confirm its actual date and inspect **Latest balances**. This does not create a Journal entry.
+
+Journal imports remain drafts until separately posted; forecasts do not post transactions.
+
+## Update
+
+1. Save a full Vault backup **outside Git**, then stop FC. Use format 4 when debt arrangements exist.
+2. Review your local changes, then fetch and switch to the intended reviewed revision. Never overwrite local work blindly.
+3. Refresh dependencies and restart with the same data root and secret:
+
+```powershell
+npm.cmd ci
+uv sync --project backend --locked --cache-dir .tmp/uv-cache
+npm.cmd run check:versions
+npm.cmd run dev
+```
+
+Opening a Vault does not authorize a schema migration. Do not run an older writer against an extended Vault without a full compatible backup and a reviewed rollback path. FC supports one writer process per configured data root.
+
+## Repository layout
+
+```text
+backend/finance_core/  Domain rules, application operations, API and SQLite adapters
+backend/tests/         Synthetic backend and contract tests
+demo/src/              Standalone React UI and Workspace-scoped client
+demo/tests/            UI behavior and development-server safety checks
+plugins/finance-core/  Official optional FRAG reader source
+public/                Branding and distribution license notices
+tools/                 Build, verification and synthetic browser helpers
+docs/md/               Usage, accounting and API notes
+docs/release/          Released OpenAPI contracts and pinned reader archives
+docs/architecture/     Architecture diagram and local viewer
+```
+
+Ignored `.local-data/`, `.local-acceptance/`, `test/`, `private/` and `.tmp/` are not distributable source. Build output is `dist/v3.10.0/`.
+
+## Data and access boundaries
+
+- Every finance request names a Workspace. The UI never opens SQLite or calculates financial amounts.
+- Admin sign-in uses an HttpOnly, SameSite session cookie. Scoped access tokens belong in authorized local backend clients, never browser storage, chat or Git.
+- The UI development server serves UI inputs, not backend files, Vault storage or private/test directories. `public/` is public and copied into builds: never store private files there. This is not an operating-system sandbox.
+- Missing observations and external completeness stay **unknown**, not invented zeroes. Reports retain separate currencies; forecasts never create transactions or payments.
+- Backups, exports, credentials, journals, screenshots and personal plans stay outside Git. Tests use isolated synthetic data, never an existing personal Vault.
+- No bank/broker/market connectors, trading, transfers, automatic deployment or production migration are included. Local application checks cannot guarantee security against a compromised OS, browser, dependency or public server configuration.
+
+[Unified accounting](docs/md/05-unified-personal-accounting.md) · [Opening balances](docs/md/06-opening-balances-and-notes.md) · [Economic evidence](docs/md/10-economic-evidence-and-debt-timing.md) · [Month-to-date review](docs/md/11-month-to-date-review.md)
+
+## Optional FRAG connection
+
+In **Settings → Connect FRAG**, choose one Vault and a read-only range, then copy its private connection configuration. In VS Code, use **FRAG: Connect Finance Core**, check the connection and explicitly authorize the smaller evidence selection. Never give FRAG the owner token or direct SQLite access.
+
+Compatible versions: **FC product/API 3.10.0 · reader 1.10.0 · protocol 2 · FRAG 1.13.4**. Existing byte-pinned reader archives are unchanged.
+
+[Reader access and authorization](docs/md/12-financial-reader-access.md) · [Plugin contract](docs/md/02-frag-finance-core-plugin.md) · [OpenAPI](docs/release/finance-core-v3.10.0-openapi.json)
+
+## Verify and build
 
 ```powershell
 npm.cmd run test:ui
-npm.cmd test -- --basetemp .tmp/<owned-synthetic-run>/pytest
+npm.cmd test -- --basetemp ".tmp/pytest-$(Get-Date -Format 'yyyyMMdd-HHmmss-fff')"
 npm.cmd run build
 npm.cmd run check:versions
 npm.cmd run check:release
-python tools/build_frag_plugin.py --check
+uv run --offline --no-sync --project backend --cache-dir .tmp/uv-cache python tools/build_frag_plugin.py --check
 ```
 
-Use a fresh repository-local pytest base directory for each run. `tools/browser_layout_plans.mjs` verifies the real UI at 1440×900, 1600×1000, 1920×1080 and 2560×1440 against an explicitly isolated synthetic server and an owned named browser session. Configure `FC_UI_API_TARGET` for that server. Never point browser tests at a personal Vault or attach to the user's browser session. Unit tests, browser measurements, image-based visual review, human acceptance and production behavior are separate claims.
+Choose a fresh repository-local pytest base directory. Browser helpers must target an isolated synthetic API, never a personal Vault or the user's browser profile. Automated tests, build success, visual review and live acceptance are separate checks.
 
-Production build output is **`dist/v3.10.0/`**. It contains `THIRD-PARTY-NOTICES.txt` and `REACT-BITS-LICENSE.txt`, linked from the footer. The user explicitly approved **React Bits BranchedMenu**, revision `d9085a5d6cb62a1c7512d8fa05a4f966736b575c`, under [MIT + Commons Clause](https://github.com/DavidHDev/react-bits/blob/d9085a5d6cb62a1c7512d8fa05a4f966736b575c/LICENSE.md). Copyright and permission text are retained; the components themselves must not be sold, sublicensed or redistributed separately. FC source disclosure is not required. This approval is scoped to the named component/use, not future dependencies. Hugeicons is not installed or bundled.
+[Architecture preview](docs/architecture/finance-core-overview/finance-core-overview-light-2048.png) · [Editable diagram](docs/architecture/finance-core-overview/finance-core-overview.archify.json) · [Local viewer](docs/architecture/finance-core-overview/finance-core-overview.html)
 
-React 19.3.0, React DOM 19.3.0 and scheduler 0.28.0 remain pinned. Build checks verify notices and reject legacy API routes, browser storage, bundled fonts, private data and rule assets. Stable output filenames are overwritten without recursively clearing directories. FINCR logo/favicon SVGs remain original local identity assets. The approved Archify 2.17 documentation workflow retains its [MIT notice](docs/architecture/finance-core-overview/LICENSE-Archify.txt) and embedded JetBrains Mono OFL notice; documentation fonts are absent from the app bundle.
+## Contributing
 
-## Data safety and rollback
+[Issues](https://github.com/O-u-i/Finance-Core/issues) and focused
+[pull requests](https://github.com/O-u-i/Finance-Core/pulls) are welcome. For help or a bug report, include
+the version, expected/actual behavior and a minimal synthetic reproduction.
+Never attach a personal Vault, real journals, credentials or unredacted exports.
 
-Do not commit personal finance data, databases/WAL/SHM files, credentials, original journals, private exports, screenshots or planning files. Default tests and browser evidence are synthetic. Real migration requires separate stopped-writer, backup and `REAL_DATA_MIGRATION_APPROVED` authorization. Vault deletion is recoverable quarantine of explicit files, not directory purge. Filesystem moves and SQLite are not crash-atomic; preserve backups and seek review after interruption.
+Use [Verify and build](#verify-and-build) for checks. Keep financial calculations
+in the backend, preserve Workspace isolation and update affected usage/API
+documentation. Original-code contributions use MIT unless explicitly agreed
+otherwise; preserve all third-party notices.
 
-Existing schema-3 Vaults need no migration or history re-entry. Reads do not create the optional debt table. Once debt arrangements exist, keep a full **format-4 / schema-3** backup; format-2 export refuses to discard them. Formats 2 and 3 still restore into an eligible empty Vault. Disable the new reader/feature to roll back consumption; do not run an older writer against an extended Vault without preserving a full backup and reviewing compatibility. Missing historical maturity dates remain unknown, pending input. The 3.0.0 Horizon PDF is still a candidate-direction baseline, not implemented commitments.
+## License
 
-No commit, push, tag, production installation, real-data migration, banking/trading integration or public deployment is performed automatically.
+Original code and documentation use the [MIT License](LICENSE).
+
+Third-party licenses remain separate. React Bits `BranchedMenu` retains [MIT + Commons Clause](public/REACT-BITS-LICENSE.txt), so the complete frontend is **not MIT-only**. Preserve [third-party notices](public/THIRD-PARTY-NOTICES.txt), font OFL notices and the [Archify notice](docs/architecture/finance-core-overview/LICENSE-Archify.txt) with their material. Frontend builds include `LICENSE.txt`; Python distributions include `backend/LICENSE`. Distribute the repository license alongside separately distributed reader archives without changing their pinned bytes.

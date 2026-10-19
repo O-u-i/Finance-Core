@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
+const projectLicense = readFileSync('LICENSE', 'utf8');
 const packages = { react: '19.3.0', 'react-dom': '19.3.0', scheduler: '0.28.0' };
 const sections = Object.entries(packages).map(([name, version]) => {
   const pkg = JSON.parse(readFileSync(`node_modules/${name}/package.json`, 'utf8'));
@@ -16,6 +17,7 @@ const notice = `Finance Core frontend third-party notices\n\n${[...sections, sid
 if (process.argv.includes('--check')) {
   const version = JSON.parse(readFileSync('package.json', 'utf8')).version;
   const root = `dist/v${version}`;
+  if (readFileSync('public/LICENSE.txt', 'utf8') !== projectLicense || readFileSync(join(root, 'LICENSE.txt'), 'utf8') !== projectLicense) throw new Error('Project MIT license is missing or stale.');
   if (readFileSync(join(root, 'THIRD-PARTY-NOTICES.txt'), 'utf8') !== notice) throw new Error('Distribution notices are missing or stale.');
   const inspect = (dir) => {
     for (const item of readdirSync(dir, { withFileTypes: true })) {
@@ -30,8 +32,9 @@ if (process.argv.includes('--check')) {
     if (bundle.includes('/api/v2') || bundle.includes('localStorage') || bundle.includes('sessionStorage')) throw new Error(`Legacy route or browser storage in runtime chunk: ${name}`);
   }
   if (readFileSync(join(root, 'REACT-BITS-LICENSE.txt'), 'utf8') !== readFileSync('public/REACT-BITS-LICENSE.txt', 'utf8')) throw new Error('Sidebar distribution license missing.');
-  console.log('Frontend distribution: pinned React MIT and approved React Bits MIT + Commons Clause notices present; no legacy routes, browser storage or font/data/rule assets.');
+  console.log('Frontend distribution: project MIT license, pinned React MIT and approved React Bits MIT + Commons Clause notices present; no legacy routes, browser storage or font/data/rule assets.');
 } else {
+  writeFileSync('public/LICENSE.txt', projectLicense, 'utf8');
   writeFileSync('public/THIRD-PARTY-NOTICES.txt', notice, 'utf8');
   console.log('Pinned frontend dependency notices generated.');
 }

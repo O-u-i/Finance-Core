@@ -1,6 +1,7 @@
 {
   "name": "finance-core",
   "version": "3.10.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
