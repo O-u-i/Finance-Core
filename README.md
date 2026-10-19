@@ -111,6 +111,13 @@ Ignored `.local-data/`, `.local-acceptance/`, `test/`, `private/` and `.tmp/` ar
 
 [Unified accounting](docs/md/05-unified-personal-accounting.md) · [Opening balances](docs/md/06-opening-balances-and-notes.md) · [Economic evidence](docs/md/10-economic-evidence-and-debt-timing.md) · [Month-to-date review](docs/md/11-month-to-date-review.md)
 
+### API permissions and cleanup
+
+- **Settings → API access** creates general local-client tokens: **Read** grants only `ledger:read`, **Write** only `ledger:write`, and **Both** grants both. These are not FRAG connection configurations; **Connect FRAG** remains read-only.
+- **Settings → Issued access:** revoke an active token first. Revoked or expired tokens offer **Delete permanently**, requiring the exact token name. This removes its token record/read grant, not audit history.
+- **Settings → Workspaces:** quarantine a Vault first, then choose **Delete permanently** and type its exact name. This owner-only action has **no undo**: it removes one quarantined database and its Vault record, invalidates its workspace undo records, and revokes tokens containing that Vault. Extra files or changed/linked paths block deletion for manual review. Directories, backups, exports and audit history are retained; this is not secure erasure.
+- If deletion fails or times out, refresh and review before an explicit retry: irreversible deletion may already have started. FC never automatically retries it.
+
 ## Optional FRAG connection
 
 In **Settings → Connect FRAG**, choose one Vault and a read-only range, then copy its private connection configuration. In VS Code, use **FRAG: Connect Finance Core**, check the connection and explicitly authorize the smaller evidence selection. Never give FRAG the owner token or direct SQLite access.

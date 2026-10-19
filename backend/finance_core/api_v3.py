@@ -55,6 +55,10 @@ class AccessTokenCreate(V3Model):
     read_grant: ReaderGrant | None = Field(default=None, alias='readGrant')
 
 
+class PermanentDeletionRequest(V3Model):
+    confirm_name: str = Field(alias='confirmName', min_length=1, max_length=120)
+
+
 class V3UndoRequest(V3Model):
     undo_token: str = Field(alias="undoToken", min_length=1)
     workspace_id: str | None = Field(default=None, alias="workspaceId")
@@ -287,6 +291,25 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
         registry(request).audit(str(uuid4()), actor, workspace_id, "workspace.quarantine", "success")
         return {"data": workspace, "undo": undo}
 
+    @router.post(
+        '/workspaces/{workspace_id}/purge', response_model=LedgerResponse, response_model_exclude_unset=True,
+        responses=STANDARD_ERROR_RESPONSES,
+        openapi_extra={'security': SESSION_SECURITY, 'x-fc-required-actor': 'owner-session'},
+    )
+    async def purge_workspace(workspace_id: str, payload: PermanentDeletionRequest, request: Request,
+                              actor: Actor = Depends(require_admin)) -> dict[str, Any]:
+        try:
+            store = registry(request)
+            async with store.vaults.lock_for(workspace_id):
+                result = await run_in_threadpool(store.purge_workspace, workspace_id, payload.confirm_name, actor)
+        except LookupError as error:
+            raise HTTPException(404, detail={'code': 'WORKSPACE_NOT_FOUND', 'message': 'Workspace was not found.'}) from error
+        except (ValueError, OSError) as error:
+            message = str(error) if isinstance(error, ValueError) else 'Quarantine files require manual review.'
+            raise HTTPException(409, detail={'code': 'WORKSPACE_PURGE_REFUSED', 'message': message}) from error
+        registry(request).audit(str(uuid4()), actor, workspace_id, 'workspace.purge', 'success')
+        return {'data': result}
+
     @router.get(
         "/access-tokens", response_model=LedgerResponse, response_model_exclude_unset=True,
         responses=STANDARD_ERROR_RESPONSES,
@@ -339,6 +362,22 @@ def create_v3_routers(admin_token: str) -> tuple[APIRouter, APIRouter]:
             raise HTTPException(404, detail={"code": "TOKEN_NOT_FOUND", "message": str(error)}) from error
         registry(request).audit(str(uuid4()), actor, None, "access-token.revoke", "success")
         return {"data": item}
+
+    @router.delete(
+        '/access-tokens/{token_id}', response_model=LedgerResponse, response_model_exclude_unset=True,
+        responses=STANDARD_ERROR_RESPONSES,
+        openapi_extra={'security': SESSION_SECURITY, 'x-fc-required-actor': 'owner-session'},
+    )
+    def delete_token(token_id: str, payload: PermanentDeletionRequest, request: Request,
+                     actor: Actor = Depends(require_admin)) -> dict[str, Any]:
+        try:
+            result = registry(request).delete_access_token(token_id, payload.confirm_name)
+        except LookupError as error:
+            raise HTTPException(404, detail={'code': 'TOKEN_NOT_FOUND', 'message': 'Access token was not found.'}) from error
+        except ValueError as error:
+            raise HTTPException(409, detail={'code': 'TOKEN_DELETE_REFUSED', 'message': str(error)}) from error
+        registry(request).audit(str(uuid4()), actor, None, 'access-token.delete', 'success')
+        return {'data': result}
 
     @router.get(
         "/undo/latest", response_model=LedgerResponse, response_model_exclude_unset=True,

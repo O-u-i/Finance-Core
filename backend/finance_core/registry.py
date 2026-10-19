@@ -6,6 +6,7 @@ import json
 import re
 import secrets
 import sqlite3
+import stat
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -317,6 +318,59 @@ class Registry:
             raise ValueError("Workspace quarantine failed; preserved files require review before retrying.") from error
         return self.get_workspace(workspace_id), undo  # type: ignore[return-value]
 
+    @synchronized
+    def purge_workspace(self, workspace_id: str, confirm_name: str, actor: Actor) -> dict[str, Any]:
+        """Irreversible owner operation: exactly one quarantined SQLite file, no tree purge."""
+        workspace = self.get_workspace(workspace_id)
+        if workspace is None:
+            raise LookupError('Workspace was not found.')
+        if not actor.is_admin or workspace['status'] != 'quarantined' or confirm_name != workspace['displayName']:
+            raise ValueError('Quarantine the Vault first and confirm its exact current name.')
+        row = self.connection.execute(
+            "SELECT * FROM control_undo WHERE workspace_id=? AND operation_type='workspace.quarantine' ORDER BY rowid DESC LIMIT 1",
+            (workspace_id,),
+        ).fetchone()
+        if row is None or not re.fullmatch(r'[0-9a-f-]{36}', row['operation_id']):
+            raise ValueError('Quarantine evidence is unavailable; manual review is required.')
+        target = self.data_root / 'quarantine' / row['operation_id'] / 'finance-core.sqlite3'
+        source = self.vaults.path_for(workspace_id)
+        moved = json.loads(row['inverse_json']).get('moved')
+        if moved != [{'source': str(source), 'target': str(target)}]:
+            raise ValueError('Only a single quarantined database file can be purged; review remaining files manually.')
+        for path in (target, *target.parents):
+            if path.is_symlink() or (path.exists() and getattr(path.lstat(), 'st_file_attributes', 0) & 0x400):
+                raise ValueError('Linked quarantine paths require manual review.')
+        if (any(Path(str(source) + suffix).exists() for suffix in ('', '-wal', '-shm'))
+                or not target.parent.is_dir() or any(path != target for path in target.parent.iterdir())):
+            raise ValueError('Quarantine files changed or additional files remain; manual review is required.')
+        exists = target.exists()
+        if exists:
+            info = target.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise ValueError('Only a regular single-link quarantined database can be purged.')
+        authorized = self.connection.execute(
+            "SELECT 1 FROM audit_events WHERE workspace_id=? AND request_id=? AND operation='workspace.purge.authorized' LIMIT 1", (workspace_id, row['operation_id']),
+        ).fetchone()
+        if not exists and not authorized:
+            raise ValueError('The quarantined database is missing; manual review is required.')
+        # Persist irreversible intent BEFORE unlinking. A crash/commit failure cannot
+        # revive a now-invalid restore operation; an explicit confirmed retry can finish.
+        try:
+            with self.transaction():
+                self.connection.execute('UPDATE control_undo SET consumed_at=COALESCE(consumed_at,?) WHERE workspace_id=?', (now_iso(), workspace_id))
+                for token in self.connection.execute('SELECT id,workspace_ids_json FROM access_tokens').fetchall():
+                    if workspace_id in json.loads(token['workspace_ids_json']):
+                        self.connection.execute('UPDATE access_tokens SET revoked_at=COALESCE(revoked_at,?) WHERE id=?', (now_iso(), token['id']))
+                self.audit(row['operation_id'], actor, workspace_id, 'workspace.purge.authorized', 'success')
+            if exists:
+                target.unlink()  # Exactly this file; never sidecars, directories or backups.
+            with self.transaction():
+                self.connection.execute('DELETE FROM control_undo WHERE workspace_id=?', (workspace_id,))
+                self.connection.execute('DELETE FROM workspaces WHERE id=?', (workspace_id,))
+        except (OSError, sqlite3.Error) as error:
+            raise ValueError('Permanent deletion could not finish. Undo may be unavailable; review or explicitly retry this deletion.') from error
+        return {'id': workspace_id, 'deleted': True, 'fileRemoved': exists}
+
     @contextmanager
     def move_files(self, pairs: list[dict[str, str]]) -> Iterator[None]:
         """Preflight all paths, move explicit files, compensate on commit failure."""
@@ -582,6 +636,20 @@ class Registry:
             raise LookupError("Access token was not found.")
         self.connection.execute("UPDATE access_tokens SET revoked_at=? WHERE id=?", (now_iso(), token_id))
         return self.get_access_token(token_id)  # type: ignore[return-value]
+
+    @synchronized
+    def delete_access_token(self, token_id: str, confirm_name: str) -> dict[str, Any]:
+        token = self.get_access_token(token_id)
+        if token is None:
+            raise LookupError('Access token was not found.')
+        expired = token['expiresAt'] is not None and datetime.fromisoformat(token['expiresAt']) <= now()
+        if (not token['revokedAt'] and not expired) or confirm_name != token['name']:
+            raise ValueError('Revoke the token first or wait for expiry, then confirm its exact name.')
+        with self.transaction():
+            if self.connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='access_token_read_grants'").fetchone():
+                self.connection.execute('DELETE FROM access_token_read_grants WHERE token_id=?', (token_id,))
+            self.connection.execute('DELETE FROM access_tokens WHERE id=?', (token_id,))
+        return {'id': token_id, 'deleted': True}
 
     @synchronized
     def audit(self, request_id: str, actor: Actor, workspace_id: str | None, operation: str, result: str) -> None:

@@ -12,6 +12,30 @@ before(async () => {
 after(async () => { await server?.close(); });
 const render = (Component, props) => renderToStaticMarkup(React.createElement(Component, props));
 
+test('generic API access exposes exact Read Write Both scopes while FRAG stays read only', async () => {
+  const {accessScopes, tokenStatus} = await server.ssrLoadModule('/demo/src/pages/Settings.jsx');
+  assert.deepEqual(Array.from(accessScopes('read')), ['ledger:read']);
+  assert.deepEqual(Array.from(accessScopes('write')), ['ledger:write']);
+  assert.deepEqual(Array.from(accessScopes('both')), ['ledger:read','ledger:write']);
+  assert.throws(() => accessScopes('unknown'));
+  assert.equal(tokenStatus({revokedAt:'2026-01-01'}),'Revoked');
+  assert.equal(tokenStatus({expiresAt:'2000-01-01T00:00:00Z'}),'Expired');
+  assert.equal(tokenStatus({}),'Active');
+  const {pageSections} = await server.ssrLoadModule('/demo/src/navigation.js');
+  assert.ok(pageSections('settings').some(item=>item.key==='api-access'));
+});
+
+test('permanent deletion requires a typed name and visibly explains irreversible scope', async () => {
+  const {PermanentDeleteConfirmation} = await server.ssrLoadModule('/demo/src/pages/Settings.jsx');
+  for (const kind of ['Vault','token']) {
+    const html = render(PermanentDeleteConfirmation,{target:{kind,id:'synthetic-id',name:'Synthetic name'},busy:false,onClose(){},onDelete(){}});
+    assert.match(html,/No undo/); assert.match(html,/Type the exact name to confirm/);
+    assert.match(html,/role="alert"/); assert.match(html,/Record ID: synthetic-id/);
+    assert.match(html,/type="submit" disabled=""/);
+    if(kind==='Vault') { assert.match(html,/revokes tokens/); assert.match(html,/directories are never recursively deleted/); }
+  }
+});
+
 test('FRAG connection is one read-only Vault form, not manual Workspace ID or JSON entry', async () => {
   const {pageSections} = await server.ssrLoadModule('/demo/src/navigation.js');
   assert.ok(pageSections('settings').some(item=>item.key==='reader-access' && item.label==='Connect FRAG'));

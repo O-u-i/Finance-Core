@@ -59,7 +59,7 @@ export default function ReaderAccess({ fc }) {
       {mode==='selected' && <fieldset><legend>Accounts and data items<Help>Only checked items are authorized. Whole-Journal or whole-Vault reports explicitly include their full aggregate scope. Notes, source text and management data are excluded.</Help></legend>
         {loading && <p role="status">Loading item names…</p>}{items.map(item=><label className="check" key={item.id}><input type="checkbox" disabled={fc.busy} checked={selected.includes(item.id)} onChange={e=>setSelected(e.target.checked?[...selected,item.id]:selected.filter(id=>id!==item.id))}/>{item.label} · {item.segment || 'whole Vault'} · {item.kind}</label>)}
       </fieldset>}
-      <p>Read only. No financial records are read when this connection is created.</p>
+      <p>Read only. No financial records are read when this connection is created. For non-FRAG Read / Write / Both tokens, use API access below.</p>
       <Button primary disabled={fc.busy || loading || !wid || (mode==='selected' && !selected.length)}>Create FRAG connection</Button>
     </form>
     {error && <p role="alert" className="notice">{error}</p>}
